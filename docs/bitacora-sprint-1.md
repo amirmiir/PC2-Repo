@@ -194,3 +194,121 @@ make --version  # GNU Make 4.3
 ### Próximo paso para el equipo
 
 Dejé lista la infraestructura completa de Make para que Amir pueda continuar refinando resolve_dns.sh y Melissa pueda comenzar con las pruebas Bats. La documentación en README.md sirve como referencia para todos los targets y variables disponibles.
+
+---
+
+## Melissa Iman (Día 1) - Lunes 29/09/2025
+
+### Contexto
+
+Desarrollé la suite de pruebas Bats inicial para validar el contrato de `resolve_dns.sh`, aplicando la metodología AAA (Arrange-Act-Assert) y RGR (Red-Green-Refactor). También documenté el contrato completo de salidas con validaciones usando herramientas de texto estándar.
+
+### Comandos ejecutados
+
+```bash
+# Creación de branch de feature
+git checkout -b features/melissa-iman
+
+# Creación de estructura de directorios
+mkdir -p src tests docs out dist
+
+# Creación del archivo de pruebas
+touch tests/01_resolve_basic.bats
+chmod +x tests/01_resolve_basic.bats
+
+# Verificación de sintaxis Bats (cuando esté instalado)
+bats --version
+
+# Ejecución de pruebas (primera corrida esperada en rojo)
+bats tests/01_resolve_basic.bats
+
+# Validación manual del contrato de salidas
+cat docs/contrato-salidas.md | grep -A 5 "dns_resolves.csv"
+```
+
+### Salidas relevantes y códigos de estado
+
+- **Comando**: `bats tests/01_resolve_basic.bats` → **Esperado**: Códigos de falla iniciales (RGR - fase roja)
+- **Archivo creado**: `tests/01_resolve_basic.bats` con 6 casos de prueba
+- **Archivo creado**: `docs/contrato-salidas.md` con contrato completo de archivos de salida
+
+### Decisiones técnicas tomadas
+
+1. **Metodología AAA/RGR implementada**:
+   - **Arrange**: Configuré variables de entorno y archivos temporales en `setup()`
+   - **Act**: Ejecuté el script bajo prueba
+   - **Assert**: Validé códigos de salida, existencia de archivos y formato de datos
+   - **Red-Green-Refactor**: Primera corrida debe fallar (rojo) hasta que Amir complete `resolve_dns.sh`
+
+2. **Casos de prueba definidos**:
+   - ✓ Generación de CSV con formato correcto (5 columnas: source,record_type,target,ttl,trace_ts)
+   - ✓ Al menos una resolución válida presente
+   - ✓ Validación de columnas (TTL numérico, record_type A o CNAME)
+   - ✓ Fallo cuando `DOMAINS_FILE` no existe (código ≠ 0)
+   - ✓ Fallo cuando `DOMAINS_FILE` no está definido (código ≠ 0)
+
+3. **Contrato de salidas documentado**:
+   - Definí formato CSV con 5 columnas obligatorias
+   - Especifiqué validaciones con `awk`, `grep`, `wc` (herramientas de texto estándar)
+   - Documenté archivos futuros del Sprint 2 (edges.csv, cycles_report.txt, etc.)
+   - Establecí reglas de determinismo y reproducibilidad
+
+4. **Variables de entorno validadas**:
+   - `DOMAINS_FILE` (obligatoria): debe existir y ser legible
+   - `DNS_SERVER` (opcional): aparece en comando dig interno
+   - Fallo esperado con código ≠ 0 si variables obligatorias faltan
+
+### Artefactos generados
+
+**Archivo**: `tests/01_resolve_basic.bats`
+- 6 casos de prueba siguiendo metodología AAA
+- Funciones `setup()` y `teardown()` para gestión de recursos
+- Validaciones de formato, contenido y códigos de error
+- 96 líneas de código documentado
+
+**Archivo**: `docs/contrato-salidas.md`
+- Contrato completo de archivos generados en `out/`
+- Validaciones con herramientas de texto (`awk`, `grep`, `wc`)
+- Documentación de Sprint 1 y Sprint 2 (preparado para expansión)
+- Variables de entorno con efectos observables
+- 132 líneas de documentación técnica
+
+**Validación del contrato con awk**:
+```bash
+# Verificar formato CSV (5 columnas, TTL numérico)
+awk -F',' 'NR>1 && NF==5 && $4 ~ /^[0-9]+$/ {count++} END {print "Registros válidos:", count}' out/dns_resolves.csv
+
+# Verificar tipos de registro (solo A o CNAME)
+awk -F',' 'NR>1 && $2!="A" && $2!="CNAME" {print "Error línea " NR; exit 1}' out/dns_resolves.csv
+
+# Detectar duplicados
+awk -F',' 'NR>1 {key=$1","$2","$3; if(seen[key]++) print "DUPLICADO:", $0}' out/dns_resolves.csv
+```
+
+### Riesgos/bloqueos encontrados
+
+- **Estado actual**: Las pruebas Bats están en fase **ROJA** (esperado según RGR)
+- **Causa**: El script `src/resolve_dns.sh` aún no está completamente funcional
+- **Mitigación**: Esto es correcto según la metodología Red-Green-Refactor. Las pruebas definen el contrato que el código debe cumplir
+- **Próximo paso**: Cuando Amir complete `resolve_dns.sh`, las pruebas deberían pasar a **VERDE**
+
+### Evidencia de AAA/RGR
+
+**Fase ROJA (actual)**:
+- Escribí las pruebas primero definiendo el contrato esperado
+- Las pruebas fallan porque `resolve_dns.sh` no existe o está incompleto
+- Esto es correcto: las pruebas guían el desarrollo
+
+**Fase VERDE (pendiente para Día 2)**:
+- Amir completará `resolve_dns.sh` para cumplir el contrato
+- Las pruebas pasarán a verde cuando el código genere el CSV correcto
+- Validaré que todas las aserciones se cumplan
+
+**Fase REFACTOR (pendiente para Día 2)**:
+- Una vez en verde, refinaremos normalización y deduplicación
+- Añadiré caso negativo: dominio inexistente que no rompa el CSV
+- Validaré que el código sigue siendo robusto tras refactoring
+
+### Próximo paso
+
+Coordinaré con Amir para verificar que `resolve_dns.sh` cumple el contrato definido en las pruebas. También prepararé la evidencia en video mostrando la transición de rojo a verde cuando el código esté listo.
