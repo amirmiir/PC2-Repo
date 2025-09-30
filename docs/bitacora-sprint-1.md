@@ -312,3 +312,42 @@ awk -F',' 'NR>1 {key=$1","$2","$3; if(seen[key]++) print "DUPLICADO:", $0}' out/
 ### Próximo paso
 
 Coordinaré con Amir para verificar que `resolve_dns.sh` cumple el contrato definido en las pruebas. También prepararé la evidencia en video mostrando la transición de rojo a verde cuando el código esté listo.
+
+---
+
+## Amir Canto (Día 2) - Martes 30/09/2025
+
+### Contexto
+Refiné la normalización de A/CNAME y TTL en dns_resolves.csv, implementé deduplicación inteligente y mejoré significativamente el manejo de errores del script de resolución DNS.
+
+### Comandos ejecutados
+
+```bash
+# Prueba de validación robusta
+unset DOMAINS_FILE && ./src/resolve_dns.sh
+echo $?  # Debe retornar 5 (CONFIG_ERROR)
+
+# Prueba con archivo inexistente  
+DOMAINS_FILE=noexiste.txt ./src/resolve_dns.sh
+echo $?  # Debe retornar 5 (CONFIG_ERROR)
+
+# Ejecución normal con deduplicación
+export DOMAINS_FILE=DOMAINS.sample.txt
+./src/resolve_dns.sh
+echo $?  # Debe retornar 0 (SUCCESS)
+
+# Validación de deduplicación
+awk -F, 'NR>1 {key=$1","$2","$3; if(seen[key]++) print "DUPLICADO:", $0}' out/dns_resolves.csv
+```
+
+### Decisiones técnicas tomadas
+
+1. **Normalización explícita**: Dominios a minúsculas, targets CNAME normalizados, IPs sin cambios
+2. **Deduplicación por TTL menor**: Mantiene registro con TTL más bajo (más fresco) si hay duplicados
+3. **Tolerancia a fallos**: Solo falla si TODOS los dominios fallan, no por fallos individuales
+4. **Validación robusta**: Verifica existencia, legibilidad y contenido de DOMAINS_FILE
+
+### Evidencias de A/CNAME + TTL en out/
+
+**Comando**: `head -5 out/dns_resolves.csv`
+**Formato normalizado**: source en minúsculas, sin puntos finales, TTL numérico
