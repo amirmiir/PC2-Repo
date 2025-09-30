@@ -5,16 +5,26 @@
 # Fecha: 2025-09-30
 #
 # Entrada por entorno:
-#   DOMAINS_FILE: ruta al archivo con dominios (uno por línea)
+#   DOMAINS_FILE: ruta al archivo con dominios (uno por línea) - OBLIGATORIO
 #   DNS_SERVER: servidor DNS a consultar (opcional, por defecto usa el del sistema)
 #
 # Salida:
 #   out/dns_resolves.csv con formato: source,record_type,target,ttl,trace_ts
-#   - source: dominio consultado
+#   - source: dominio consultado (normalizado, sin punto final)
 #   - record_type: tipo de registro (A o CNAME)
 #   - target: destino de la resolución (IP para A, dominio para CNAME)
 #   - ttl: tiempo de vida en segundos
 #   - trace_ts: timestamp de la consulta (epoch)
+#
+# Códigos de salida:
+#   0: SUCCESS - Al menos un dominio se resolvió exitosamente
+#   3: DNS_ERROR - No se pudo resolver ningún dominio (fallo crítico)
+#   5: CONFIG_ERROR - Error de configuración (DOMAINS_FILE inválido/faltante)
+#
+# Comportamiento de errores:
+#   - Dominios individuales que fallan se registran como WARN pero no detienen la ejecución
+#   - Solo se retorna código ≠ 0 si TODOS los dominios fallan o hay error de configuración
+#   - Dominios con formato inválido se ignoran (logged como WARN)
 
 # Cargar utilidades comunes
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,14 +33,32 @@ source "$SCRIPT_DIR/common.sh"
 # Verificar dependencias
 check_dependency "dig"
 
-# Verificar variables de entorno obligatorias
+# Verificar variables de entorno obligatorias con validación robusta
 if [[ -z "${DOMAINS_FILE:-}" ]]; then
-    log "ERROR" "Variable DOMAINS_FILE es obligatoria"
+    log "ERROR" "Variable DOMAINS_FILE es obligatoria pero no está definida"
+    log "ERROR" "Uso: DOMAINS_FILE=archivo.txt $0"
     exit $EXIT_CONFIG_ERROR
 fi
 
-# Validar archivo de dominios
-validate_file "$DOMAINS_FILE"
+# Validar archivo de dominios con verificación detallada
+if [[ ! -f "$DOMAINS_FILE" ]]; then
+    log "ERROR" "Archivo de dominios no encontrado: $DOMAINS_FILE"
+    exit $EXIT_CONFIG_ERROR
+fi
+
+if [[ ! -r "$DOMAINS_FILE" ]]; then
+    log "ERROR" "Archivo de dominios no es legible: $DOMAINS_FILE"
+    log "ERROR" "Verificar permisos de lectura"
+    exit $EXIT_CONFIG_ERROR
+fi
+
+# Verificar que el archivo no esté vacío
+if [[ ! -s "$DOMAINS_FILE" ]]; then
+    log "ERROR" "Archivo de dominios está vacío: $DOMAINS_FILE"
+    exit $EXIT_CONFIG_ERROR
+fi
+
+log "INFO" "Archivo de dominios validado: $DOMAINS_FILE"
 
 # Configurar servidor DNS si se especifica
 DNS_ARGS=()
@@ -46,10 +74,17 @@ ensure_directory "out"
 readonly OUTPUT_FILE="out/dns_resolves.csv"
 
 # Función para resolver un dominio y extraer información
+# Retorna: 0 si se resuelve exitosamente, 1 si hay error pero no crítico, 3 si error DNS crítico
 resolve_domain() {
     local domain="$1"
     local timestamp
     timestamp=$(date +%s)
+    
+    # Validar formato básico del dominio
+    if [[ ! "$domain" =~ ^[a-zA-Z0-9][a-zA-Z0-9.-]*[a-zA-Z0-9]$ ]]; then
+        log "WARN" "Dominio con formato inválido ignorado: $domain"
+        return 1  # Error no crítico - continuar con otros dominios
+    fi
     
     log "INFO" "Resolviendo dominio: $domain"
     
@@ -68,6 +103,9 @@ resolve_domain() {
     fi
     
     log "INFO" "Consultas DNS completadas para: $domain"
+    
+    # Verificar si hay resultados en el archivo temporal
+    local records_found=0
     
     # Procesar la salida de dig
     while IFS= read -r line; do
@@ -89,9 +127,16 @@ resolve_domain() {
             if [[ "$record_type" == "A" || "$record_type" == "CNAME" ]]; then
                 echo "$source,$record_type,$target,$ttl,$timestamp"
                 log "INFO" "Registro encontrado: $source -> $record_type -> $target (TTL: $ttl)"
+                ((records_found++))
             fi
         fi
     done < "$temp_output"
+    
+    # Verificar si se encontraron registros para este dominio
+    if [[ $records_found -eq 0 ]]; then
+        log "WARN" "No se encontraron registros A/CNAME para: $domain"
+        return 1  # Error no crítico - continuar con otros dominios
+    fi
     
     return 0
 }
@@ -131,12 +176,22 @@ main() {
     # Verificar que se generó al menos una resolución válida
     local line_count
     line_count=$(wc -l < "$OUTPUT_FILE")
+    
+    # Solo fallar si NO se resolvió ningún dominio (todos fallaron)
     if [[ "$line_count" -le 1 ]]; then
-        log "ERROR" "No se pudieron resolver dominios válidos"
+        log "ERROR" "FALLO CRÍTICO: No se pudieron resolver ninguno de los $domain_count dominios"
+        log "ERROR" "Verificar conectividad de red y validez de los dominios"
         exit $EXIT_DNS_ERROR
     fi
     
-    log "INFO" "CSV generado con $((line_count - 1)) registros"
+    # Si algunos dominios fallaron pero al menos uno se resolvió, continuar
+    if [[ $resolved_count -lt $domain_count ]]; then
+        local failed_count=$((domain_count - resolved_count))
+        log "WARN" "Se resolvieron $resolved_count de $domain_count dominios ($failed_count fallaron)"
+        log "WARN" "Continuando con los dominios exitosos"
+    fi
+    
+    log "INFO" "CSV generado exitosamente con $((line_count - 1)) registros DNS"
 }
 
 # Ejecutar función principal si el script se ejecuta directamente
