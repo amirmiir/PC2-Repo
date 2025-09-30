@@ -1,0 +1,7 @@
+# Archivo de ejemplo de dominios de prueba
+# Formato: un dominio por línea
+
+google.com
+github.com
+stackoverflow.com
+wikipedia.org
