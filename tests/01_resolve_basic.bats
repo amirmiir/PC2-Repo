@@ -95,3 +95,50 @@ teardown() {
     # Assert: debe fallar con código distinto de cero
     [ "$status" -ne 0 ]
 }
+
+@test "resolve_dns.sh tolera dominios inexistentes sin romper CSV" {
+    # Arrange: crear archivo con dominio inexistente mezclado con válidos
+    local test_file="${BATS_TEST_TMPDIR}/mixed_domains.txt"
+    cat > "${test_file}" <<EOF
+google.com
+dominio-que-no-existe-12345.com
+cloudflare.com
+EOF
+
+    # Act: ejecutar con dominios mixtos
+    export DOMAINS_FILE="${test_file}"
+    run bash "${TEST_DIR}/src/resolve_dns.sh"
+
+    # Assert: debe tener éxito porque hay dominios válidos
+    [ "$status" -eq 0 ]
+
+    # Assert: CSV debe mantener formato correcto
+    [ -f "${OUT_DIR}/dns_resolves.csv" ]
+
+    # Assert: debe tener registros de dominios válidos
+    run grep -E "(google\.com|cloudflare\.com)" "${OUT_DIR}/dns_resolves.csv"
+    [ "$status" -eq 0 ]
+
+    # Cleanup
+    rm -f "${test_file}"
+}
+
+@test "resolve_dns.sh falla solo si TODOS los dominios son inválidos" {
+    # Arrange: crear archivo solo con dominios inexistentes
+    local test_file="${BATS_TEST_TMPDIR}/invalid_domains.txt"
+    cat > "${test_file}" <<EOF
+dominio-invalido-123.invalid
+otro-dominio-que-no-existe.test
+dominio-ficticio.nxdomain
+EOF
+
+    # Act: ejecutar con solo dominios inválidos
+    export DOMAINS_FILE="${test_file}"
+    run bash "${TEST_DIR}/src/resolve_dns.sh"
+
+    # Assert: debe fallar porque TODOS los dominios fallaron
+    [ "$status" -ne 0 ]
+
+    # Cleanup
+    rm -f "${test_file}"
+}
