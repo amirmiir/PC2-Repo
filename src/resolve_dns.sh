@@ -25,6 +25,11 @@
 #   - Dominios individuales que fallan se registran como WARN pero no detienen la ejecución
 #   - Solo se retorna código ≠ 0 si TODOS los dominios fallan o hay error de configuración
 #   - Dominios con formato inválido se ignoran (logged como WARN)
+#
+# Algoritmos implementados:
+# - NORMALIZACIÓN: Dominios a minúsculas, sin puntos finales DNS
+# - DEDUPLICACIÓN: Por source,record_type,target - mantiene TTL menor (más fresco)
+# - TOLERANCIA A FALLOS: Continúa si algunos dominios fallan, solo falla si todos fallan
 
 # Cargar utilidades comunes
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -73,6 +78,36 @@ ensure_directory "out"
 # Archivo de salida
 readonly OUTPUT_FILE="out/dns_resolves.csv"
 
+# Función para deduplicar registros manteniendo TTL más reciente
+# Deduplicación: misma combinación source,record_type,target mantiene TTL menor (más fresco)
+deduplicate_csv() {
+    local input_file="$1"
+    local temp_file
+    temp_file=$(create_temp_file)
+    
+    # Mantener encabezado
+    head -1 "$input_file" > "$temp_file"
+    
+    # Procesar registros eliminando duplicados por source,record_type,target
+    awk -F, '
+    NR>1 {
+        key = $1","$2","$3
+        if (!(key in seen) || $4 < ttl[key]) {
+            records[key] = $0
+            ttl[key] = $4
+            seen[key] = 1
+        }
+    }
+    END {
+        for (key in records) {
+            print records[key]
+        }
+    }' "$input_file" | sort >> "$temp_file"
+    
+    mv "$temp_file" "$input_file"
+    log "INFO" "Deduplicación completada"
+}
+
 # Función para resolver un dominio y extraer información
 # Retorna: 0 si se resuelve exitosamente, 1 si hay error pero no crítico, 3 si error DNS crítico
 resolve_domain() {
@@ -119,9 +154,16 @@ resolve_domain() {
             local record_type="${BASH_REMATCH[3]}"
             local target="${BASH_REMATCH[4]}"
             
-            # Normalizar el source (remover punto final si existe)
-            source="${source%.}"
-            target="${target%.}"
+            # NORMALIZACIÓN EXPLÍCITA:
+            # 1. Remover punto final DNS (ejemplo.com. -> ejemplo.com)
+            # 2. Convertir a minúsculas para consistencia
+            # 3. Mantener formato original de IPs (no normalizar A records)
+            source="${source%.}"          # Remover punto final
+            source="${source,,}"          # Convertir a minúsculas
+            target="${target%.}"          # Remover punto final del target
+            if [[ "$record_type" == "CNAME" ]]; then
+                target="${target,,}"      # Solo normalizar CNAME targets
+            fi
             
             # Solo procesar registros A y CNAME
             if [[ "$record_type" == "A" || "$record_type" == "CNAME" ]]; then
@@ -163,14 +205,18 @@ main() {
         ((domain_count++))
         
         # Resolver dominio y agregar al CSV
-        resolve_domain "$domain" >> "$OUTPUT_FILE"
-        if [[ $? -eq 0 ]]; then
+        if resolve_domain "$domain" >> "$OUTPUT_FILE"; then
             ((resolved_count++))
         fi
         
     done < "$DOMAINS_FILE"
     
     log "INFO" "Procesamiento completado: $resolved_count/$domain_count dominios resueltos"
+    
+    # Aplicar deduplicación al CSV final
+    log "INFO" "Aplicando deduplicación de registros..."
+    deduplicate_csv "$OUTPUT_FILE"
+    
     log "INFO" "Resultados guardados en: $OUTPUT_FILE"
     
     # Verificar que se generó al menos una resolución válida
