@@ -66,9 +66,33 @@ line_count=$(wc -l < out/dns_resolves.csv)
 from,to,kind
 ```
 
-**Validación**:
+**Descripción de columnas**:
+- `from`: Nodo origen (dominio fuente)
+- `to`: Nodo destino (dominio o IP objetivo)
+- `kind`: Tipo de arista (`CNAME` o `A`)
+
+**Ejemplo de contenido válido**:
+```csv
+from,to,kind
+www.github.com,github.com,CNAME
+github.com,140.82.121.4,A
+```
+
+**Validación con herramientas de texto**:
+
+Verificar formato (3 columnas, kind válido):
 ```bash
 awk -F',' 'NR>1 && NF==3 && ($3=="CNAME" || $3=="A")' out/edges.csv
+```
+
+Verificar que from y to no están vacíos:
+```bash
+awk -F',' 'NR>1 && ($1=="" || $2=="") {print "Error línea " NR; exit 1}' out/edges.csv
+```
+
+Contar aristas por tipo:
+```bash
+awk -F',' 'NR>1 && $3=="CNAME" {cname++} NR>1 && $3=="A" {a++} END {print "CNAME:", cname, "A:", a}' out/edges.csv
 ```
 
 ### depth_report.txt
