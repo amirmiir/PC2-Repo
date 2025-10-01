@@ -106,7 +106,16 @@ build: tools
 	fi
 	@# Ejecutar script de resolución DNS
 	@echo "Ejecutando resolución DNS..."
-	@DOMAINS_FILE=$(DOMAINS_FILE) DNS_SERVER=$(DNS_SERVER) $(SRC_DIR)/resolve_dns.sh
+	@DOMAINS_FILE=$(DOMAINS_FILE) DNS_SERVER=$(DNS_SERVER) $(SRC_DIR)/resolve_dns.sh || { \
+		echo "ADVERTENCIA: resolve_dns.sh retornó código $$?"; \
+		echo "Verificando si se generaron artefactos..."; \
+		if [ -f "$(OUT_DIR)/dns_resolves.csv" ]; then \
+			echo "CSV generado, continuando..."; \
+		else \
+			echo "ERROR: No se generó CSV"; \
+			exit 1; \
+		fi; \
+	}
 	@echo ""
 	@echo "==================================================================="
 	@echo "Build completado. Artefactos generados en $(OUT_DIR)/"
