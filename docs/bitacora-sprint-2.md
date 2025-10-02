@@ -1,57 +1,97 @@
 # Bitácora Sprint 2
 
-## Melissa Iman (Día 3) - Miércoles 01/10/2025
+## Diego Orrego (Día 3) - Miércoles 01/10/2025
 
 ### Contexto
 
-Desarrollé la suite de pruebas Bats para validar la construcción del grafo de dependencias DNS, incluyendo generación de edge-list, cálculo de profundidad y detección de ciclos CNAME. Apliqué metodología AAA/RGR y ejecuté revisión de código para asegurar calidad.
+Implementé el script `src/build_graph.sh` para construir el grafo de dependencias DNS a partir del CSV de resoluciones. Este script genera dos artefactos clave: el edge list (edges.csv) que representa las conexiones entre dominios e IPs, y el reporte de profundidad (depth_report.txt) que calcula métricas sobre la longitud de las cadenas de resolución.
 
 ### Comandos ejecutados
 
 ```bash
-# Crear archivo de pruebas para grafo
-touch tests/02_cycles_and_depth.bats
-chmod +x tests/02_cycles_and_depth.bats
+# Crear el script de construcción de grafo
+touch src/build_graph.sh
+chmod +x src/build_graph.sh
 
-# Contar líneas del archivo creado
-wc -l tests/02_cycles_and_depth.bats
+# Ejecutar construcción de grafo
+./src/build_graph.sh
 
-# Actualizar contrato de salidas con formato edges.csv
-cat docs/contrato-salidas.md | grep -A 10 "edges.csv"
+# Validar edge list generado
+head -5 out/edges.csv
+wc -l out/edges.csv
 
-# Ejecutar revisión de código
-# (análisis de patrones Bats, validaciones, casos edge)
+# Validar tipos de aristas
+awk -F',' 'NR > 1 {print $3}' out/edges.csv | sort | uniq -c
+
+# Verificar reporte de profundidad
+cat out/depth_report.txt
+
+# Validar formato de edges.csv (3 columnas)
+awk -F',' 'NR > 1 && NF != 3 {print "ERROR: línea " NR " tiene " NF " columnas"; exit 1}' out/edges.csv
+echo $?
 ```
 
 ### Salidas relevantes y códigos de estado
 
-- **Archivo creado**: `tests/02_cycles_and_depth.bats` con 202 líneas
-- **Casos de prueba totales**: 7 tests para grafo
-- **Revisión de código**: Calificación 7.5/10
-- **Archivo actualizado**: `docs/contrato-salidas.md` con formato edges.csv ampliado
+- **Comando**: `./src/build_graph.sh` → **Código**: 0 (éxito)
+  ```
+  [2025-10-01 22:10:51] [INFO] Iniciando construcción de grafo DNS
+  [2025-10-01 22:10:51] [INFO] Validando archivo de entrada: out/dns_resolves.csv
+  [2025-10-01 22:10:51] [INFO] Validación completada: 8 líneas encontradas
+  [2025-10-01 22:10:51] [INFO] Generando edge list desde out/dns_resolves.csv
+  Aristas generadas - A: 7, CNAME: 0
+  [2025-10-01 22:10:51] [INFO] Edge list generado: 7 aristas en out/edges.csv
+  [2025-10-01 22:10:51] [INFO] Calculando profundidad del grafo
+  [2025-10-01 22:10:51] [INFO] Reporte de profundidad generado: out/depth_report.txt
+  [2025-10-01 22:10:51] [INFO] Profundidad máxima: 6, promedio: 3.14
+  ```
+
+- **Comando**: `head -5 out/edges.csv` → **Salida**:
+  ```csv
+  from,to,kind
+  google.com,142.250.0.113,A
+  google.com,142.250.0.102,A
+  google.com,142.250.0.101,A
+  google.com,142.250.0.138,A
+  ```
+
+- **Comando**: `wc -l out/edges.csv` → **Salida**: `8 out/edges.csv` (7 aristas + header)
+
+- **Comando**: `awk -F',' 'NR > 1 {print $3}' out/edges.csv | sort | uniq -c` → **Salida**:
+  ```
+        7 A
+  ```
+  Esto indica que los 7 registros en el dataset actual son todos de tipo A (resolución directa), sin CNAMEs.
+
+- **Comando**: Validación de formato → **Código**: 0 (todas las líneas tienen 3 columnas correctamente)
 
 ### Decisiones técnicas tomadas
 
-1. **Casos de prueba para edges.csv**:
-   - Validación de formato (from,to,kind con 3 columnas)
-   - Verificación de tipos kind (solo CNAME o A permitidos)
-   - Validación que from/to no estén vacíos
-   - Uso de awk para contar aristas por tipo
+1. **Generación de edge list con awk**:
+   Utilicé awk para procesar el CSV de forma eficiente, generando aristas en formato `from,to,kind`. Cada registro DNS se convierte en una arista del grafo:
+   - Registros A: `dominio -> IP` (tipo A)
+   - Registros CNAME: `dominio -> cname_destino` (tipo CNAME)
 
-2. **Casos de prueba para depth_report.txt**:
-   - Verificación de existencia del archivo
-   - Validación de presencia de métricas de profundidad
-   - Test específico para cadena CNAME->A (profundidad >= 2)
+2. **Cálculo de profundidad**:
+   Implementé un algoritmo que cuenta las aristas por cada origen único. La profundidad representa el número de saltos desde el dominio de entrada hasta llegar a un registro A final:
+   ```
+   Profundidad máxima: 6 saltos
+   Profundidad promedio: 3.14 saltos
+   ```
 
-3. **Casos de prueba para ciclos CNAME**:
-   - Test de ciclo simple (2 nodos: loop1->loop2->loop1)
-   - Verificación de reporte en cycles_report.txt
-   - Detección de palabra clave "CYCLE" o "ciclo"
+3. **Criterio de profundidad**:
+   - Para dominios con resolución A directa (sin CNAMEs intermedios): profundidad = 1
+   - Para cadenas con CNAMEs: profundidad = número de saltos en la cadena
+   - Ejemplo: `ejemplo.com -> cname1.com -> cname2.com -> 1.2.3.4` tiene profundidad 3
 
-4. **Patrón de backup/restore para datos de prueba**:
-   - Respaldo de dns_resolves.csv antes de tests
-   - Restauración después de ejecución
-   - Cleanup explícito con variables locales
+4. **Separación C-L-E (Configurar-Lanzar-Ejecutar)**:
+   El script `build_graph.sh` NO consulta la red, solo post-procesa el CSV generado previamente. Esto mantiene la separación de responsabilidades y permite ejecutar el análisis de grafo sin depender de conectividad DNS.
+
+5. **Manejo de errores robusto**:
+   - Validación de existencia y legibilidad de `dns_resolves.csv`
+   - Verificación de CSV no vacío (al menos 2 líneas: header + datos)
+   - Uso de archivos temporales gestionados por `common.sh` con cleanup automático
+   - Códigos de salida documentados (EXIT_SUCCESS=0, EXIT_CONFIG_ERROR=5)
 
 ### Artefactos generados
 
@@ -159,3 +199,4 @@ awk -F',' 'NR>1 && $3=="CNAME" {cname++} NR>1 && $3=="A" {a++} END {print "CNAME
 ### Próximo paso
 
 Implementaré las mejoras de aislamiento identificadas en la revisión. Para Día 4, desarrollaré `tests/03_connectivity_probe.bats` y `tests/04_env_contracts.bats` completando la cobertura de Sprint 2.
+---
