@@ -123,6 +123,16 @@ line_count=$(wc -l < out/edges.csv)
 [ "$line_count" -gt 1 ] && echo "Edge list contiene datos"
 ```
 
+Verificar que from y to no están vacíos:
+```bash
+awk -F',' 'NR>1 && ($1=="" || $2=="") {print "Error línea " NR; exit 1}' out/edges.csv
+```
+
+Contar aristas por tipo:
+```bash
+awk -F',' 'NR>1 && $3=="CNAME" {cname++} NR>1 && $3=="A" {a++} END {print "CNAME:", cname, "A:", a}' out/edges.csv
+```
+
 ### depth_report.txt
 
 **Propósito**: Reporte de profundidad del grafo DNS con métricas estadísticas sobre la longitud de las cadenas de resolución.

@@ -93,81 +93,110 @@ echo $?
    - Uso de archivos temporales gestionados por `common.sh` con cleanup automático
    - Códigos de salida documentados (EXIT_SUCCESS=0, EXIT_CONFIG_ERROR=5)
 
-### Artefactos generados en out/
+### Artefactos generados
 
-**Archivo 1**: `out/edges.csv`
-- Formato: `from,to,kind` (3 columnas CSV)
-- Contenido: 7 aristas tipo A
-- Tamaño: 8 líneas (1 header + 7 datos)
+**Archivo**: `tests/02_cycles_and_depth.bats`
+- 202 líneas de código documentado
+- 7 casos de prueba con metodología AAA
+- Cobertura: formato, validación de columnas, profundidad, ciclos, manejo de errores
 
-**Validación con awk**:
-```bash
-# Verificar formato (3 columnas obligatorias)
-awk -F',' 'NR > 1 && NF == 3 {count++} END {print "Aristas válidas:", count}' out/edges.csv
-# Salida: Aristas válidas: 7
+**Casos de prueba implementados**:
 
-# Verificar que kind sea A o CNAME
-awk -F',' 'NR > 1 && $3 != "A" && $3 != "CNAME" {print "Error: kind inválido en línea " NR; exit 1}' out/edges.csv
-echo $?
-# Salida: 0 (todas las aristas tienen kind válido)
-```
+1. `build_graph.sh genera edges.csv con formato correcto`
+2. `build_graph.sh valida columnas de edges.csv correctamente`
+3. `build_graph.sh genera depth_report.txt con métricas de profundidad`
+4. `build_graph.sh calcula profundidad correctamente para CNAME chain`
+5. `build_graph.sh maneja correctamente registros solo tipo A`
+6. `build_graph.sh falla si no existe dns_resolves.csv`
+7. `build_graph.sh detecta ciclos CNAME simples`
 
-**Archivo 2**: `out/depth_report.txt`
-- Formato: Texto legible con secciones delimitadas
-- Métricas principales:
-  - Cadenas analizadas: 7
-  - Profundidad máxima: 6
-  - Profundidad promedio: 3.14
+**Archivo actualizado**: `docs/contrato-salidas.md`
+- Descripción detallada de columnas de edges.csv
+- Ejemplo de contenido válido
+- 3 comandos de validación con awk
+- Contador de aristas por tipo (CNAME vs A)
 
-**Fragmento del reporte**:
-```
-===================================================================
-Reporte de Profundidad del Grafo DNS
-===================================================================
+### Revisión de código - Resultados clave
 
-Generado: 2025-10-01 22:10:51
-Entrada: out/dns_resolves.csv
+**Puntos fuertes identificados** (calificación 7.5/10):
+- ✓ Estructura AAA bien aplicada con comentarios
+- ✓ Validación de headers CSV correcta
+- ✓ Uso apropiado de awk para validar estructura
+- ✓ Nombres de tests descriptivos
+- ✓ Intento de manejo de estado con backup/restore
 
-Métricas:
-  - Cadenas analizadas: 7
-  - Profundidad máxima: 6
-  - Profundidad promedio: 3.14
+**Mejoras identificadas**:
+- Aislamiento de tests mejorable (usar BATS_TEST_TMPDIR)
+- Cleanup debería estar en teardown() o usar trap
+- Validación de ciclos condicional (debería ser obligatoria)
+- Falta limpieza de archivos de salida entre tests
+- Validación de profundidad solo verifica existencia, no valores numéricos
 
-Definición:
-  Profundidad = número de saltos desde dominio origen hasta registro A final
-```
-
-### Análisis técnico del grafo generado
-
-**Observaciones sobre los datos actuales**:
-1. El dataset de prueba contiene únicamente registros A directos (sin CNAMEs intermedios)
-2. Google.com resuelve a 6 IPs diferentes (múltiples registros A)
-3. Github.com resuelve a 1 IP
-
-**Interpretación de profundidad = 6 para google.com**:
-- El algoritmo cuenta cada arista `google.com -> IP` como un salto
-- Como google.com tiene 6 registros A, la profundidad máxima es 6
-- Esta métrica cambiará cuando se agreguen dominios con CNAMEs en cadena
-
-**Preparación para detección de ciclos (Día 4)**:
-El edge list generado servirá como base para implementar la detección de ciclos mañana. La estructura `from,to,kind` permite construir un grafo dirigido donde:
-- Nodos: dominios e IPs
-- Aristas: relaciones CNAME o A
-- Ciclos: cuando existe un camino desde un nodo de vuelta a sí mismo siguiendo las aristas
+**Casos edge faltantes identificados**:
+- CSV vacío (solo header)
+- CSV malformado (columnas faltantes)
+- Cadenas CNAME largas (3+ hops)
+- Ciclos de 3+ nodos
+- CNAME auto-referencial
+- Grafos desconectados múltiples
 
 ### Riesgos/bloqueos encontrados
 
-- **Complejidad inicial del algoritmo**: Primera versión usaba while loops para seguir cadenas, causando timeout en la ejecución
-- **Mitigación**: Simplifiqué usando awk con arrays asociativos para contar aristas por origen, mejorando performance significativamente
-- **Resultado**: Ejecución instantánea (< 1 segundo) incluso con múltiples registros por dominio
+- **Dependencia del script build_graph.sh**: Tests en fase ROJA hasta que Amir implemente el script
+- **Estado compartido**: Múltiples tests modifican dns_resolves.csv, potencial race condition
+- **Mitigación para Sprint 3**: Refactorizar usando BATS_TEST_TMPDIR y cleanup robusto
 
-### Próximo paso para el equipo
+### Evidencia de tests implementados
 
-Dejé listos los artefactos base del grafo (`edges.csv` y `depth_report.txt`) para que mañana (Día 4) pueda continuar con:
-1. Implementación de detección de ciclos en `build_graph.sh`
-2. Generación de `cycles_report.txt`
-3. Pruebas con dominios que tengan CNAMEs en cadena
+**Test de formato edges.csv**:
+```bash
+@test "build_graph.sh genera edges.csv con formato correcto" {
+    # Arrange: verificar que existe el script
+    [ -f "${TEST_DIR}/src/build_graph.sh" ]
 
-Coordiné con Melissa para que pueda comenzar a trabajar en `tests/02_cycles_and_depth.bats` validando el formato de estos archivos.
+    # Act: ejecutar construcción de grafo
+    run bash "${TEST_DIR}/src/build_graph.sh"
 
+    # Assert: verificar cabecera del CSV
+    header=$(head -n 1 "${OUT_DIR}/edges.csv")
+    [ "$header" = "from,to,kind" ]
+}
+```
+
+**Test de ciclo CNAME**:
+```bash
+@test "build_graph.sh detecta ciclos CNAME simples" {
+    # Arrange: crear CSV con ciclo CNAME (loop)
+    local test_csv="${OUT_DIR}/dns_resolves_test.csv"
+    cat > "${test_csv}" <<EOF
+source,record_type,target,ttl,trace_ts
+loop1.example.com,CNAME,loop2.example.com,300,1696089600
+loop2.example.com,CNAME,loop1.example.com,300,1696089600
+EOF
+    # ... backup, ejecución, restore ...
+
+    # Assert: debe reportar el ciclo
+    if [ -f "${OUT_DIR}/cycles_report.txt" ]; then
+        run grep -qi "cycle\|ciclo" "${OUT_DIR}/cycles_report.txt"
+        [ "$status" -eq 0 ]
+    fi
+}
+```
+
+### Validaciones añadidas al contrato
+
+```bash
+# Verificar formato (3 columnas, kind válido)
+awk -F',' 'NR>1 && NF==3 && ($3=="CNAME" || $3=="A")' out/edges.csv
+
+# Verificar que from y to no están vacíos
+awk -F',' 'NR>1 && ($1=="" || $2=="") {print "Error línea " NR; exit 1}' out/edges.csv
+
+# Contar aristas por tipo
+awk -F',' 'NR>1 && $3=="CNAME" {cname++} NR>1 && $3=="A" {a++} END {print "CNAME:", cname, "A:", a}' out/edges.csv
+```
+
+### Próximo paso
+
+Implementaré las mejoras de aislamiento identificadas en la revisión. Para Día 4, desarrollaré `tests/03_connectivity_probe.bats` y `tests/04_env_contracts.bats` completando la cobertura de Sprint 2.
 ---
