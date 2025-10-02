@@ -59,26 +59,140 @@ line_count=$(wc -l < out/dns_resolves.csv)
 
 ### edges.csv
 
-**Propósito**: Lista de aristas del grafo de dependencias DNS.
+**Propósito**: Lista de aristas (edges) del grafo de dependencias DNS que representa las relaciones entre dominios e IPs.
 
 **Formato**: CSV con encabezado
 ```
 from,to,kind
 ```
 
-**Validación**:
+**Descripción de columnas**:
+- `from`: Nodo origen (dominio)
+- `to`: Nodo destino (dominio CNAME o IP final)
+- `kind`: Tipo de relación (`CNAME` o `A`)
+
+**Lógica de construcción de aristas**:
+- Para registros A: `dominio -> IP` (kind=A)
+- Para registros CNAME: `dominio -> cname_destino` (kind=CNAME)
+
+**Ejemplo de contenido válido**:
+```csv
+from,to,kind
+google.com,142.250.0.113,A
+google.com,142.250.0.102,A
+www.github.com,github.com,CNAME
+github.com,140.82.121.4,A
+```
+
+**Características**:
+- Generado a partir de `dns_resolves.csv` (no consulta red)
+- Determinista: mismo CSV de entrada produce mismo edge list
+- Una fila por cada relación DNS encontrada
+- Múltiples registros A para un dominio generan múltiples aristas
+
+**Validación con herramientas de texto**:
+
+Verificar formato (3 columnas obligatorias):
 ```bash
-awk -F',' 'NR>1 && NF==3 && ($3=="CNAME" || $3=="A")' out/edges.csv
+awk -F',' 'NR>1 && NF==3 {count++} END {print "Aristas válidas:", count}' out/edges.csv
+```
+
+Verificar que `kind` sea solo A o CNAME:
+```bash
+# Verificar que no hay valores inválidos en columna kind
+awk -F',' 'NR>1 && ($3 == "A" || $3 == "CNAME") {valid++} NR>1 {total++} END {if (valid == total) print "OK: todos los kind son válidos"; else print "ERROR: hay kind inválidos"}' out/edges.csv
+```
+
+Contar tipos de aristas:
+```bash
+awk -F',' 'NR>1 {print $3}' out/edges.csv | sort | uniq -c
+```
+
+Verificar que `from` y `to` existen en dns_resolves.csv:
+```bash
+# Extraer nodos del edge list
+awk -F',' 'NR>1 {print $1; print $2}' out/edges.csv | sort -u > /tmp/nodes.txt
+# Verificar que corresponden a source/target en dns_resolves.csv
+awk -F',' 'NR>1 {print $1; print $3}' out/dns_resolves.csv | sort -u > /tmp/dns_nodes.txt
+diff /tmp/nodes.txt /tmp/dns_nodes.txt
+```
+
+Verificar que hay al menos una arista:
+```bash
+line_count=$(wc -l < out/edges.csv)
+[ "$line_count" -gt 1 ] && echo "Edge list contiene datos"
 ```
 
 ### depth_report.txt
 
-**Propósito**: Reporte de profundidad máxima y promedio del grafo.
+**Propósito**: Reporte de profundidad del grafo DNS con métricas estadísticas sobre la longitud de las cadenas de resolución.
 
-**Validación**:
+**Formato**: Texto legible con secciones delimitadas por líneas `===`
+
+**Estructura del archivo**:
+```
+===================================================================
+Reporte de Profundidad del Grafo DNS
+===================================================================
+
+Generado: <timestamp>
+Entrada: <archivo_csv_origen>
+
+Métricas:
+  - Cadenas analizadas: <N>
+  - Profundidad máxima: <max>
+  - Profundidad promedio: <avg>
+
+Definición:
+  Profundidad = número de saltos desde dominio origen hasta registro A final
+
+Ejemplo:
+  ejemplo.com -> cname1.com -> cname2.com -> 1.2.3.4
+  Profundidad: 3 (3 aristas en la cadena)
+
+Nota:
+  Para dominios con resolución A directa (sin CNAMEs), profundidad = 1
+
+===================================================================
+```
+
+**Definición de profundidad**:
+- Profundidad = número de saltos/aristas desde dominio origen hasta registro A final
+- Para dominios con resolución A directa: profundidad = 1
+- Para cadenas CNAME: profundidad = número de CNAMEs + 1 (registro A final)
+
+**Ejemplo de interpretación**:
+```
+Cadena: www.ejemplo.com -> ejemplo.com -> cdn.ejemplo.com -> 1.2.3.4
+Aristas: 3 (2 CNAMEs + 1 A)
+Profundidad: 3
+```
+
+**Validación con herramientas de texto**:
+
+Verificar que contiene las métricas obligatorias:
 ```bash
-grep -q "Profundidad máxima" out/depth_report.txt
-grep -q "Profundidad promedio" out/depth_report.txt
+grep -q "Profundidad máxima" out/depth_report.txt && echo "Métrica máxima OK"
+grep -q "Profundidad promedio" out/depth_report.txt && echo "Métrica promedio OK"
+grep -q "Cadenas analizadas" out/depth_report.txt && echo "Métrica cadenas OK"
+```
+
+Extraer métricas para análisis:
+```bash
+grep "Profundidad máxima" out/depth_report.txt | awk '{print $NF}'
+grep "Profundidad promedio" out/depth_report.txt | awk '{print $NF}'
+grep "Cadenas analizadas" out/depth_report.txt | awk '{print $NF}'
+```
+
+Verificar formato del archivo:
+```bash
+# Debe tener delimitadores
+grep -c "^===" out/depth_report.txt  # Debe ser >= 2
+```
+
+Validar que el archivo no está vacío:
+```bash
+[ -f out/depth_report.txt ] && [ -s out/depth_report.txt ] && echo "Reporte generado correctamente"
 ```
 
 ### cycles_report.txt
