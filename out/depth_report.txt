@@ -2,7 +2,7 @@
 Reporte de Profundidad del Grafo DNS
 ===================================================================
 
-Generado: 2025-10-01 22:04:44
+Generado: 2025-10-01 22:10:51
 Entrada: out/dns_resolves.csv
 
 Métricas:
