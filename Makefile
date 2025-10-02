@@ -116,9 +116,9 @@ tools:
 		which $(tool) > /dev/null 2>&1 || \
 		(echo "ERROR: Herramienta '$(tool)' no encontrada. Por favor instálela." && exit 1);)
 	@echo ""
-	@echo "✓ Todas las herramientas requeridas están instaladas:"
+	@echo "OK - Todas las herramientas requeridas están instaladas:"
 	@$(foreach tool,$(REQUIRED_TOOLS), \
-		echo "  ✓ $(tool): $$(which $(tool))";)
+		echo "  OK $(tool): $$(which $(tool))";)
 	@echo ""
 	@echo "==================================================================="
 
@@ -191,12 +191,12 @@ clean:
 	@if [ -d "$(OUT_DIR)" ]; then \
 		echo "Eliminando contenido de $(OUT_DIR)/..."; \
 		rm -rf $(OUT_DIR)/*; \
-		echo "✓ $(OUT_DIR)/ limpiado"; \
+		echo "OK $(OUT_DIR)/ limpiado"; \
 	fi
 	@if [ -d "$(DIST_DIR)" ]; then \
 		echo "Eliminando contenido de $(DIST_DIR)/..."; \
 		rm -rf $(DIST_DIR)/*; \
-		echo "✓ $(DIST_DIR)/ limpiado"; \
+		echo "OK $(DIST_DIR)/ limpiado"; \
 	fi
 	@echo ""
 	@echo "==================================================================="
