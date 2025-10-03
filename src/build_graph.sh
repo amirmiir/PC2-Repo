@@ -15,6 +15,7 @@
 # Salida:
 #   - out/edges.csv: formato "from,to,kind" donde kind ∈ {CNAME,A}
 #   - out/depth_report.txt: profundidad máxima y promedio
+#   - out/cycles_report.txt: detección de ciclos CNAME
 #
 # Reglas:
 #   - NO consulta red, solo post-procesa CSV (respeta separación C-L-E)
@@ -28,6 +29,7 @@ source "${SCRIPT_DIR}/common.sh"
 readonly INPUT_CSV="${OUT_DIR:-out}/dns_resolves.csv"
 readonly OUTPUT_EDGES="${OUT_DIR:-out}/edges.csv"
 readonly OUTPUT_DEPTH="${OUT_DIR:-out}/depth_report.txt"
+readonly OUTPUT_CYCLES="${OUT_DIR:-out}/cycles_report.txt"
 
 # Validaciones de entrada
 validate_input() {
@@ -213,6 +215,123 @@ calculate_depth() {
     log "INFO" "Profundidad máxima: ${max_depth}, promedio: ${avg_depth}"
 }
 
+# Detecta ciclos en cadenas CNAME
+detect_cycles() {
+    log "INFO" "Detectando ciclos en cadenas CNAME"
+
+    # Usar archivo temporal para análisis
+    local temp_cnames
+    temp_cnames=$(create_temp_file)
+
+    # Extraer solo aristas CNAME
+    awk -F',' 'NR > 1 && $3 == "CNAME" {print $1 "," $2}' "$OUTPUT_EDGES" > "$temp_cnames"
+
+    # Generar reporte base
+    {
+        echo "==================================================================="
+        echo "Reporte de Detección de Ciclos DNS"
+        echo "==================================================================="
+        echo ""
+        echo "Generado: $(date +'%Y-%m-%d %H:%M:%S')"
+        echo "Entrada: ${OUTPUT_EDGES}"
+        echo ""
+        echo "Análisis de cadenas CNAME:"
+        echo ""
+    } > "$OUTPUT_CYCLES"
+
+    # Verificar si hay aristas CNAME para analizar
+    local cname_count
+    cname_count=$(wc -l < "$temp_cnames")
+    
+    if [[ $cname_count -eq 0 ]]; then
+        {
+            echo "No se encontraron registros CNAME en el grafo."
+            echo "Sin posibilidad de ciclos CNAME."
+            echo ""
+            echo "Estado: SIN CICLOS"
+            echo ""
+            echo "==================================================================="
+        } >> "$OUTPUT_CYCLES"
+        log "INFO" "No hay registros CNAME - sin posibilidad de ciclos"
+        return 0
+    fi
+
+    # Algoritmo de detección de ciclos usando awk
+    awk -F',' '
+    BEGIN {
+        cycles_found = 0
+    }
+
+    {
+        # Construir mapa from -> to para CNAMEs
+        cname_map[$1] = $2
+        sources[$1] = 1
+    }
+
+    END {
+        print "" >> output_file
+        
+        # Para cada nodo origen, seguir la cadena
+        for (start in sources) {
+            visited_count = 0
+            delete visited
+            current = start
+            
+            # Seguir cadena hasta encontrar ciclo o final
+            while (current in cname_map) {
+                if (current in visited) {
+                    # Ciclo detectado
+                    cycle_nodes = ""
+                    for (node in visited) {
+                        cycle_nodes = cycle_nodes node " "
+                    }
+                    cycle_nodes = cycle_nodes current
+                    
+                    print "CYCLE DETECTADO:" >> output_file
+                    print "  Nodos involucrados: " cycle_nodes >> output_file
+                    print "  Inicio del ciclo: " current >> output_file
+                    print "" >> output_file
+                    cycles_found++
+                    break
+                }
+                
+                visited[current] = 1
+                visited_count++
+                current = cname_map[current]
+                
+                # Prevenir bucles infinitos
+                if (visited_count > 10) {
+                    print "POSIBLE CICLO LARGO en cadena iniciada en: " start >> output_file
+                    print "  (Cadena truncada por límite de seguridad)" >> output_file
+                    print "" >> output_file
+                    cycles_found++
+                    break
+                }
+            }
+        }
+        
+        # Resumen final
+        if (cycles_found > 0) {
+            print "Estado: CICLOS ENCONTRADOS (" cycles_found ")" >> output_file
+            print "Acción recomendada: Revisar configuración DNS" >> output_file
+        } else {
+            print "Estado: SIN CICLOS" >> output_file
+            print "Todas las cadenas CNAME terminan correctamente" >> output_file
+        }
+        
+        print "" >> output_file
+        print "===================================================================" >> output_file
+        
+        # Log para build_graph.sh
+        print "Ciclos detectados: " cycles_found > "/dev/stderr"
+    }
+    ' output_file="$OUTPUT_CYCLES" "$temp_cnames" 2>&1 | while read -r line; do
+        log "INFO" "$line"
+    done
+
+    log "INFO" "Reporte de ciclos generado: ${OUTPUT_CYCLES}"
+}
+
 # Función principal
 main() {
     log "INFO" "Iniciando construcción de grafo DNS"
@@ -229,10 +348,14 @@ main() {
     # Paso 3: Calcular profundidad
     calculate_depth
 
+    # Paso 4: Detectar ciclos
+    detect_cycles
+
     log "INFO" "Construcción de grafo completada exitosamente"
     log "INFO" "Salidas generadas:"
     log "INFO" "  - ${OUTPUT_EDGES}"
     log "INFO" "  - ${OUTPUT_DEPTH}"
+    log "INFO" "  - ${OUTPUT_CYCLES}"
 
     exit $EXIT_SUCCESS
 }

@@ -1,8 +1,7 @@
 source,record_type,target,ttl,trace_ts
 google.com,A,142.250.0.113,50,1759195656
 google.com,A,142.250.0.102,50,1759195656
-google.com,A,142.250.0.101,50,1759195656
-google.com,A,142.250.0.138,50,1759195656
-google.com,A,142.250.0.139,50,1759195656
-google.com,A,142.250.0.100,50,1759195656
+loop1.example.com,CNAME,loop2.example.com,300,1759195658
+loop2.example.com,CNAME,loop1.example.com,300,1759195659
 github.com,A,4.228.31.150,34,1759195682
+www.github.com,CNAME,github.com,3600,1759195661
