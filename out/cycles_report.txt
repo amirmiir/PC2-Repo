@@ -2,21 +2,13 @@
 Reporte de Detección de Ciclos DNS
 ===================================================================
 
-Generado: 2025-10-02 23:33:49
+Generado: 2025-10-02 23:58:33
 Entrada: out/edges.csv
 
 Análisis de cadenas CNAME:
 
 
-CYCLE DETECTADO:
-  Nodos involucrados: loop2.example.com loop1.example.com loop2.example.com
-  Inicio del ciclo: loop2.example.com
-
-CYCLE DETECTADO:
-  Nodos involucrados: loop2.example.com loop1.example.com loop1.example.com
-  Inicio del ciclo: loop1.example.com
-
-Estado: CICLOS ENCONTRADOS (2)
-Acción recomendada: Revisar configuración DNS
+Estado: SIN CICLOS
+Todas las cadenas CNAME terminan correctamente
 
 ===================================================================

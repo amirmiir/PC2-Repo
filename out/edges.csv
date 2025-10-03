@@ -1,7 +1,5 @@
 from,to,kind
-google.com,142.250.0.113,A
-google.com,142.250.0.102,A
-loop1.example.com,loop2.example.com,CNAME
-loop2.example.com,loop1.example.com,CNAME
-github.com,4.228.31.150,A
-www.github.com,github.com,CNAME
+www.example.com,cdn1.example.com,CNAME
+cdn1.example.com,cdn2.example.com,CNAME
+cdn2.example.com,cdn3.example.com,CNAME
+cdn3.example.com,93.184.216.34,A
