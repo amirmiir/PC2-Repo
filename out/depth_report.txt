@@ -2,13 +2,13 @@
 Reporte de Profundidad del Grafo DNS
 ===================================================================
 
-Generado: 2025-10-01 22:10:51
+Generado: 2025-10-02 23:33:49
 Entrada: out/dns_resolves.csv
 
 Métricas:
-  - Cadenas analizadas: 7
-  - Profundidad máxima: 6
-  - Profundidad promedio: 3.14
+  - Cadenas analizadas: 3
+  - Profundidad máxima: 2
+  - Profundidad promedio: 1.33
 
 Definición:
   Profundidad = número de saltos desde dominio origen hasta registro A final
