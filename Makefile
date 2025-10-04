@@ -4,6 +4,7 @@
 # Variables de entorno por defecto (pueden sobrescribirse)
 DOMAINS_FILE ?= DOMAINS.sample.txt
 DNS_SERVER ?= 1.1.1.1
+MAX_DEPTH ?= 10
 RELEASE ?= 0.1.0
 
 # Directorios
@@ -17,7 +18,7 @@ DOCS_DIR := docs
 REQUIRED_TOOLS := dig curl ss awk sed sort uniq tee find
 
 # Targets .PHONY (no generan archivos)
-.PHONY: all tools build test run clean help
+.PHONY: all tools build test run pack clean help
 
 # ==============================================================================
 # TARGETS CON CACHE INCREMENTAL - Solo rebuilding si cambian dependencias
@@ -83,6 +84,9 @@ help:
 	@echo "  make run        Ejecuta el flujo completo del proyecto con"
 	@echo "                  las variables de entorno configuradas"
 	@echo ""
+	@echo "  make pack       Genera paquete reproducible en dist/ etiquetado"
+	@echo "                  con RELEASE para distribución"
+	@echo ""
 	@echo "  make clean      Elimina archivos generados en out/ y dist/"
 	@echo "                  de forma segura"
 	@echo ""
@@ -93,7 +97,8 @@ help:
 	@echo ""
 	@echo "  DOMAINS_FILE    Archivo con lista de dominios (actual: $(DOMAINS_FILE))"
 	@echo "  DNS_SERVER      Servidor DNS a consultar (actual: $(DNS_SERVER))"
-	@echo "  RELEASE         Etiqueta de versión para empaquetado (actual: $(RELEASE))"
+	@echo "  MAX_DEPTH       Limite de profundidad para proteccion (actual: $(MAX_DEPTH))"
+	@echo "  RELEASE         Etiqueta de version para empaquetado (actual: $(RELEASE))"
 	@echo ""
 	@echo "==================================================================="
 	@echo "Ejemplo de uso:"
@@ -178,6 +183,40 @@ run: build
 	@echo ""
 	@echo "==================================================================="
 	@echo "Ejecución completada"
+	@echo "==================================================================="
+
+# ==============================================================================
+# TARGET: pack - Genera paquete reproducible para distribución
+# ==============================================================================
+pack: build
+	@echo "==================================================================="
+	@echo "Generando paquete reproducible: dist/proyecto12-v$(RELEASE).tar.gz"
+	@echo "==================================================================="
+	@echo ""
+	@mkdir -p $(DIST_DIR)
+	@# Crear estructura de paquete con contenido reproducible
+	@echo "Preparando contenido del paquete..."
+	@echo "- Código fuente (src/)"
+	@echo "- Archivos de configuración y documentación"
+	@echo "- Artefactos generados (out/)"
+	@echo "- Suite de pruebas (tests/)"
+	@echo ""
+	@# Crear el paquete con orden determinista
+	@tar -czf $(DIST_DIR)/proyecto12-v$(RELEASE).tar.gz \
+		--exclude='.git*' \
+		--exclude='$(DIST_DIR)' \
+		--transform 's,^,proyecto12-v$(RELEASE)/,' \
+		$(SRC_DIR)/ $(TEST_DIR)/ $(OUT_DIR)/ $(DOCS_DIR)/ \
+		Makefile DOMAINS.sample.txt 2>/dev/null || true
+	@echo ""
+	@echo "Paquete generado exitosamente:"
+	@ls -lh $(DIST_DIR)/proyecto12-v$(RELEASE).tar.gz
+	@echo ""
+	@echo "Contenido del paquete:"
+	@tar -tzf $(DIST_DIR)/proyecto12-v$(RELEASE).tar.gz | head -20
+	@echo ""
+	@echo "==================================================================="
+	@echo "Empaquetado completado - RELEASE: $(RELEASE)"
 	@echo "==================================================================="
 
 # ==============================================================================

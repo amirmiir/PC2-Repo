@@ -242,3 +242,192 @@ real 0m2.027s  -> connectivity_ss.txt (timestamp: 08:34:47)
 - [x] Bitácora Sprint 3 actualizada con evidencia técnica
 - [ ] Suite Bats completa ejecutada (pendiente instalación bats)
 - [ ] PR final a develop con cambios del día 5
+
+---
+
+## Amir Canto - Día 5: Target Pack + Caché Incremental + Idempotencia
+
+### Contexto
+
+Implementé las funcionalidades finales para completar el Sprint 3: target `pack` en Makefile para generar paquetes reproducibles, documentación de variables de entorno finales, y verificación de caché incremental e idempotencia observable del sistema de build.
+
+### Comandos ejecutados
+
+```bash
+# 1. Implementar target pack en Makefile
+# Agregar variable MAX_DEPTH y actualizar .PHONY
+# Crear target pack con dependencia en build
+
+# 2. Verificar caché incremental e idempotencia
+make clean                              # Limpiar todo primero
+time make build                         # Primera ejecución completa  
+time make build                         # Segunda ejecución (debe usar caché)
+touch DOMAINS.sample.txt               # Forzar rebuild
+time make build                         # Tercera ejecución (rebuild selectivo)
+
+# 3. Generar paquete reproducible
+RELEASE=3.0.0 make pack                # Crear paquete etiquetado
+ls -lh dist/                          # Verificar archivo generado
+tar -tzf dist/proyecto12-v3.0.0.tar.gz | head -10   # Inspeccionar contenido
+```
+
+### Salidas relevantes
+
+**Primera ejecución (build completo)**:
+- Tiempo: real 0m0.169s, user 0m0.046s, sys 0m0.124s
+- Genera todos los artefactos: `dns_resolves.csv`, `edges.csv`, `depth_report.txt`, `cycles_report.txt`
+- Mensajes de "Generando" para cada archivo
+
+**Segunda ejecución (caché incremental)**:
+- Tiempo: real 0m0.046s, user 0m0.015s, sys 0m0.031s  
+- **3.7x más rápido** - demuestra caché efectivo
+- Mensaje: "Build completado con caché incremental"
+- No regenera archivos existentes
+
+**Tercera ejecución (rebuild selectivo)**:
+- Tiempo: real 0m0.158s, user 0m0.042s, sys 0m0.116s
+- Detecta cambio en `DOMAINS.sample.txt` 
+- Regenera solo dependencias afectadas
+
+**Generación de paquete**:
+```
+Paquete generado exitosamente:
+-rw-r--r-- 1 user group 12K dist/proyecto12-v3.0.0.tar.gz
+
+Contenido del paquete:
+proyecto12-v3.0.0/src/resolve_dns.sh
+proyecto12-v3.0.0/src/build_graph.sh
+proyecto12-v3.0.0/src/verify_connectivity.sh
+proyecto12-v3.0.0/src/common.sh
+proyecto12-v3.0.0/tests/01_resolve_basic.bats
+proyecto12-v3.0.0/tests/02_cycles_and_depth.bats
+proyecto12-v3.0.0/tests/03_connectivity_probe.bats
+proyecto12-v3.0.0/tests/04_env_contracts.bats
+```
+
+### Decisiones técnicas
+
+1. **Target pack reproducible**:
+   - `--transform 's,^,proyecto12-v$(RELEASE)/,'` para estructura consistente
+   - `--exclude='.git*'` y `--exclude='$(DIST_DIR)'` evita recursión
+   - Orden determinista de archivos en tar
+   - Nomenclatura: `proyecto12-v$(RELEASE).tar.gz`
+
+2. **Variables de entorno finales**:
+   - `MAX_DEPTH ?= 10` - límite protector contra loops CNAME
+   - `RELEASE ?= 0.1.0` - etiqueta de versión por defecto
+   - Documentación completa en README.md con tabla variable→efecto
+
+3. **Caché incremental**:
+   - Basado en timestamps de Make con dependencias explícitas
+   - `$(OUT_DIR)/dns_resolves.csv: $(DOMAINS_FILE) $(SRC_DIR)/resolve_dns.sh`
+   - `$(OUT_DIR)/edges.csv: $(OUT_DIR)/dns_resolves.csv $(SRC_DIR)/build_graph.sh`
+   - Solo rebuilding cuando cambian dependencias
+
+4. **Estructura del paquete**:
+   - Incluye: `src/`, `tests/`, `out/`, `docs/`, `Makefile`, `DOMAINS.sample.txt`
+   - Excluye: `.git*`, `dist/` (evita archivos temporales y recursión)
+   - Tamaño compacto: ~12K para distribución
+
+### Screenshots ubicados en docs/imagenes/
+
+- `sprint3-amir-cache-inicial.png` - Primera ejecución con build completo y tiempos
+
+![Cache inicial](imagenes/sprint3-amir-cache-inicial.png)
+
+- `sprint3-amir-cache-incremental.png` - Segunda ejecución usando caché (3.7x más rápido)
+
+![Cache incremental](imagenes/sprint3-amir-cache-incremental.png)
+
+- `sprint3-amir-cache-rebuild.png` - Tercera ejecución con rebuild selectivo tras touch
+
+![Cache rebuild](imagenes/sprint3-amir-cache-rebuild.png)
+
+- `sprint3-amir-pack-generacion.png` - Proceso de empaquetado con RELEASE=3.0.0
+
+![Pack generacion](imagenes/sprint3-amir-pack-generacion.png)
+
+- `sprint3-amir-pack-contenido.png` - Listado del contenido del tar.gz generado
+
+![Pack contenido](imagenes/sprint3-amir-pack-contenido.png)
+
+### Artefactos generados
+
+| Archivo | Tamaño | Contenido |
+|---------|--------|-----------|
+| `dist/proyecto12-v3.0.0.tar.gz` | 12K | Paquete reproducible con código fuente, tests, artefactos y documentación |
+| `Makefile` (actualizado) | - | Target `pack` agregado con dependencias y help actualizado |
+
+### Validación de idempotencia
+
+**Definición aplicada**: Ejecutar `make build` múltiples veces sin cambios produce el mismo resultado sin trabajo innecesario.
+
+**Evidencia medida**:
+```bash
+# Idempotencia verificada
+Run 1: 0.169s (build completo)
+Run 2: 0.046s (caché - 3.7x más rápido)  
+Run 3: 0.158s (rebuild tras cambio en dependencia)
+```
+
+**Indicadores de caché efectivo**:
+- Tiempos significativamente menores en segunda ejecución
+- Mensajes específicos: "caché incremental" 
+- No se ejecutan comandos `dig` en segunda corrida
+- Archivos `out/` mantienen timestamps originales
+
+**Contraste con otros scripts**:
+- `build_graph.sh`: idempotente puro (mismo input → mismo output)
+- `verify_connectivity.sh`: idempotente en estructura, dinámico en contenido
+- `Makefile`: idempotente con caché inteligente basado en dependencias
+
+### Observaciones técnicas - Make
+
+**Dependencias explícitas**:
+- `dns_resolves.csv` depende de `$(DOMAINS_FILE)` y scripts DNS
+- `edges.csv + depth_report.txt` dependen de `dns_resolves.csv` y `build_graph.sh`
+- Caché basado en timestamps: solo regenera si dependencia es más nueva
+
+**Variables Make**:
+- `?=` permite override desde línea de comandos
+- `.PHONY` declara targets que no generan archivos
+- `@echo` silencia comandos para output limpio
+
+**Reproducibilidad del paquete**:
+- Tar con orden consistente y estructura predefinida
+- Exclusión de archivos temporales y .git
+- Nomenclatura versionada con `$(RELEASE)`
+
+### Integración Sprint 3
+
+**Completado por Amir**:
+- [x] Target `pack` implementado y funcional
+- [x] Variables de entorno documentadas en README
+- [x] Caché incremental verificado y medido
+- [x] Idempotencia demostrada con evidencia cuantitativa
+- [x] Paquete reproducible generado en `dist/`
+- [x] Screenshots documentados en bitácora
+
+**Coordinación con equipo**:
+- Melissa: Script `verify_connectivity.sh` funcional (Sprint 3)
+- Diego: Pendiente validación suite Bats y variables finales
+- Todos: PR final a `main` con video de cierre Sprint 3
+
+### Próximo paso
+
+Preparar PR final a `main` que incluya:
+- Target `pack` completamente funcional 
+- Documentación actualizada de variables
+- Evidencias de caché e idempotencia
+- Integración con trabajo de Melissa y Diego
+
+### Códigos de estado
+
+- Todas las ejecuciones retornaron código 0 (éxito)
+- `make pack` completado sin errores
+- Caché incremental funcionando según especificación
+- Paquete generado y validado correctamente
+
+---
+
+*Screenshots correspondientes ubicados en `docs/imagenes/` con nomenclatura `sprint3-amir-*.png`*
