@@ -1,280 +1,359 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# src/verify_connectivity.sh
+# Verifica conectividad de IPs tipo A usando ss y sondas HTTP/HTTPS con curl
+# Metodología: Fail-fast, salidas deterministas en out/
+# Códigos de salida:
+#   0 = éxito
+#   1 = error genérico
+#   3 = error de red/conectividad
+#   5 = error de configuración
 
-# verify_connectivity.sh - Verificación de conectividad DNS
-# Autor: Amir Canto
-# Fecha: 2025-10-03
-#
-# Descripción:
-#   Verifica conectividad a IPs finales del grafo DNS usando:
-#   1. ss: Evidencia de sockets/conexiones disponibles
-#   2. curl: Sondas HTTP/HTTPS con tiempos de respuesta
-#
-# Entrada:
-#   - out/edges.csv (nodos finales tipo A = IPs)
-#
-# Salida:
-#   - out/connectivity_ss.txt: evidencia de sockets con ss
-#   - out/curl_probe.txt: resultado de sondas HTTP/HTTPS
-#
-# Reglas:
-#   - Verificación mínima sin montar infraestructura adicional
-#   - Evidenciar estado/protocolo y latencia básica
-#   - Respeta separación C-L-E: post-procesa edges.csv
+set -euo pipefail
 
-# Cargar utilidades comunes
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-source "${SCRIPT_DIR}/common.sh"
+# Configuración de directorios
+readonly SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+readonly PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+readonly OUT_DIR="${PROJECT_ROOT}/out"
 
-# Configuración
-readonly INPUT_EDGES="${OUT_DIR:-out}/edges.csv"
-readonly OUTPUT_SS="${OUT_DIR:-out}/connectivity_ss.txt"
-readonly OUTPUT_CURL="${OUT_DIR:-out}/curl_probe.txt"
+# Archivos de entrada/salida
+readonly EDGES_FILE="${OUT_DIR}/edges.csv"
+readonly DNS_RESOLVES_FILE="${OUT_DIR}/dns_resolves.csv"
+readonly CONNECTIVITY_SS_OUTPUT="${OUT_DIR}/connectivity_ss.txt"
+readonly CURL_PROBE_OUTPUT="${OUT_DIR}/curl_probe.txt"
 
-# Validaciones de entrada
-validate_input() {
-    log "INFO" "Validando archivo de entrada: ${INPUT_EDGES}"
+# Variables configurables
+readonly CURL_TIMEOUT="${CURL_TIMEOUT:-5}"
+readonly CURL_MAX_TIME="${CURL_MAX_TIME:-10}"
 
-    if [[ ! -f "$INPUT_EDGES" ]]; then
-        log "ERROR" "Archivo edges.csv no encontrado: ${INPUT_EDGES}"
-        log "ERROR" "Ejecuta 'make build' primero para generar el grafo"
-        exit $EXIT_CONFIG_ERROR
+# Función de limpieza
+cleanup() {
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error durante verificación de conectividad (código: $exit_code)" >&2
     fi
-
-    if [[ ! -r "$INPUT_EDGES" ]]; then
-        log "ERROR" "Archivo edges.csv no legible: ${INPUT_EDGES}"
-        exit $EXIT_CONFIG_ERROR
-    fi
-
-    # Verificar que el CSV tiene al menos el header
-    local line_count
-    line_count=$(wc -l < "$INPUT_EDGES")
-    if [[ $line_count -lt 2 ]]; then
-        log "ERROR" "edges.csv vacío o solo contiene header: ${INPUT_EDGES}"
-        exit $EXIT_CONFIG_ERROR
-    fi
-
-    log "INFO" "Validación completada: ${line_count} líneas encontradas"
+    exit $exit_code
 }
 
-# Extrae IPs finales (registros tipo A) del grafo
-extract_target_ips() {
-    log "INFO" "Extrayendo IPs finales desde ${INPUT_EDGES}"
+trap cleanup EXIT ERR
 
-    # Usar archivo temporal para IPs
-    local temp_ips
-    temp_ips=$(create_temp_file)
-
-    # Extraer IPs de registros tipo A (columna 'to' donde kind='A')
-    awk -F',' '
-    NR > 1 && $3 == "A" {
-        ip = $2
-        gsub(/^[[:space:]]+|[[:space:]]+$/, "", ip)
-        if (ip != "") {
-            print ip
-        }
-    }
-    ' "$INPUT_EDGES" | sort -u > "$temp_ips"
-
-    local ip_count
-    ip_count=$(wc -l < "$temp_ips")
-    
-    if [[ $ip_count -eq 0 ]]; then
-        log "WARN" "No se encontraron IPs (registros tipo A) en el grafo"
-        return 1
+# Validación de prerequisitos
+validate_prerequisites() {
+    # Verificar que existe archivo DNS resolves
+    if [ ! -f "${DNS_RESOLVES_FILE}" ]; then
+        echo "Error: No existe ${DNS_RESOLVES_FILE}" >&2
+        echo "Ejecuta resolve_dns.sh primero" >&2
+        exit 5
     fi
 
-    log "INFO" "IPs únicas extraídas: ${ip_count}"
-    echo "$temp_ips"
+    # Verificar que existe edges.csv (opcional pero recomendado)
+    if [ ! -f "${EDGES_FILE}" ]; then
+        echo "Advertencia: No existe ${EDGES_FILE}, usando dns_resolves.csv directamente" >&2
+    fi
+
+    # Verificar herramientas requeridas
+    # En macOS, usar netstat en lugar de ss
+    if ! command -v ss &> /dev/null && ! command -v netstat &> /dev/null; then
+        echo "Error: ni 'ss' ni 'netstat' encontrados" >&2
+        exit 5
+    fi
+
+    if ! command -v curl &> /dev/null; then
+        echo "Error: comando 'curl' no encontrado" >&2
+        exit 5
+    fi
 }
 
-# Verifica conectividad con ss (socket statistics)
-probe_with_ss() {
-    local ip_file="$1"
-    log "INFO" "Verificando conectividad con ss"
+# Extraer IPs tipo A desde edges.csv o dns_resolves.csv
+extract_a_records() {
+    local ips=()
 
-    # Generar reporte base
+    # Intentar desde edges.csv primero
+    if [ -f "${EDGES_FILE}" ]; then
+        # Extraer columna 'to' donde 'kind' es 'A'
+        while IFS=, read -r from to kind; do
+            if [ "$kind" = "A" ] && [ "$to" != "to" ]; then
+                ips+=("$to")
+            fi
+        done < "${EDGES_FILE}"
+    fi
+
+    # Si no hay IPs desde edges, usar dns_resolves.csv
+    if [ ${#ips[@]} -eq 0 ]; then
+        while IFS=, read -r source record_type target ttl trace_ts; do
+            if [ "$record_type" = "A" ] && [ "$target" != "target" ]; then
+                ips+=("$target")
+            fi
+        done < "${DNS_RESOLVES_FILE}"
+    fi
+
+    # Eliminar duplicados y ordenar
+    printf '%s\n' "${ips[@]}" | sort -u
+}
+
+# Verificar conectividad con ss o netstat
+verify_with_ss() {
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S %Z')
+    local use_netstat=false
+
+    # Detectar si usar netstat (macOS) o ss (Linux)
+    if ! command -v ss &> /dev/null; then
+        use_netstat=true
+    fi
+
     {
         echo "==================================================================="
-        echo "Reporte de Conectividad con ss (Socket Statistics)"
+        echo "Reporte de Conectividad con ss/netstat (Socket Statistics)"
         echo "==================================================================="
+        echo "Generado: ${timestamp}"
+        echo "Herramienta: $(if $use_netstat; then echo 'netstat (macOS)'; else echo 'ss (Linux)'; fi)"
+        echo "Objetivo: Verificar estado de sockets y conexiones TCP/UDP activas"
         echo ""
-        echo "Generado: $(date +'%Y-%m-%d %H:%M:%S')"
-        echo "Entrada: ${INPUT_EDGES}"
+        echo "-------------------------------------------------------------------"
+        echo "Estado general de sockets TCP"
+        echo "-------------------------------------------------------------------"
+
+        if $use_netstat; then
+            # Usar netstat en macOS
+            netstat -an -p tcp | head -20
+        else
+            # Usar ss en Linux
+            ss -tan | head -20
+        fi
+
         echo ""
-        echo "Verificación de sockets y conectividad:"
+        echo "-------------------------------------------------------------------"
+        echo "Conexiones establecidas (ESTAB/ESTABLISHED)"
+        echo "-------------------------------------------------------------------"
+
+        if $use_netstat; then
+            netstat -an -p tcp | grep ESTABLISHED | head -15
+        else
+            ss -tan state established | head -15
+        fi
+
         echo ""
-    } > "$OUTPUT_SS"
+        echo "-------------------------------------------------------------------"
+        echo "Estadísticas de sockets por protocolo"
+        echo "-------------------------------------------------------------------"
 
-    local ips_checked=0
-    local connections_found=0
+        if $use_netstat; then
+            echo "TCP sockets:"
+            netstat -an -p tcp | grep -c "^tcp" || echo "0"
+            echo "UDP sockets:"
+            netstat -an -p udp | grep -c "^udp" || echo "0"
+        else
+            echo "TCP sockets:"
+            ss -tan | grep -c "^tcp" || echo "0"
+            echo "UDP sockets:"
+            ss -uan | grep -c "^udp" || echo "0"
+        fi
 
-    # Verificar cada IP
-    while IFS= read -r ip; do
-        [[ -z "$ip" ]] && continue
-        
-        {
-            echo "--- IP: $ip ---"
-            echo "Timestamp: $(date +'%H:%M:%S')"
-            
-            # Intentar verificar conexiones establecidas a esta IP
-            echo "Conexiones establecidas:"
-            ss -tuln 2>/dev/null | grep -E "(LISTEN|ESTAB)" | head -3 || echo "  No hay conexiones LISTEN/ESTAB visibles"
-            
-            # Información de red general
-            echo "Estado de interfaces de red:"
-            ss -i 2>/dev/null | head -2 || echo "  Sin información de interfaces disponible"
-            
-            # Verificar si la IP es alcanzable (sin hacer ping real)
-            echo "Verificación de alcance (dst):"
-            ss -tuln dst "$ip" 2>/dev/null | head -2 || echo "  IP no encontrada en tabla de sockets locales"
-            
-            echo ""
-        } >> "$OUTPUT_SS"
-        
-        ips_checked=$((ips_checked + 1))
-        connections_found=$((connections_found + 1))  # Simplificado para demostración
-        
-    done < "$ip_file"
+        echo ""
+        echo "-------------------------------------------------------------------"
+        echo "Verificación de puertos comunes (HTTP/HTTPS)"
+        echo "-------------------------------------------------------------------"
 
-    # Resumen final
-    {
+        # Verificar conexiones en puertos HTTP/HTTPS
+        echo "Conexiones en puerto 80 (HTTP):"
+        if $use_netstat; then
+            netstat -an -p tcp | grep "\.80 " | head -5 || echo "  No hay conexiones activas en puerto 80"
+        else
+            ss -tan | grep ":80 " | head -5 || echo "  No hay conexiones activas en puerto 80"
+        fi
+
+        echo ""
+        echo "Conexiones en puerto 443 (HTTPS):"
+        if $use_netstat; then
+            netstat -an -p tcp | grep "\.443 " | head -5 || echo "  No hay conexiones activas en puerto 443"
+        else
+            ss -tan | grep ":443 " | head -5 || echo "  No hay conexiones activas en puerto 443"
+        fi
+
+        echo ""
+        echo "-------------------------------------------------------------------"
+        echo "IPs destino desde resoluciones DNS"
+        echo "-------------------------------------------------------------------"
+
+        # Listar IPs de interés
+        local ips
+        ips=$(extract_a_records)
+
+        if [ -n "$ips" ]; then
+            echo "$ips" | while read -r ip; do
+                echo "Buscando conexiones a: $ip"
+                local found=false
+
+                if $use_netstat; then
+                    if netstat -an | grep -q "$ip"; then
+                        netstat -an | grep "$ip" | head -3
+                        found=true
+                    fi
+                else
+                    if ss -tan | grep -q "$ip"; then
+                        ss -tan | grep "$ip" | head -3
+                        found=true
+                    fi
+                fi
+
+                if ! $found; then
+                    echo "  No hay conexiones activas a esta IP"
+                fi
+            done
+        else
+            echo "  No se encontraron IPs tipo A para verificar"
+        fi
+
+        echo ""
         echo "==================================================================="
-        echo "Resumen de Conectividad ss:"
-        echo "  - IPs verificadas: ${ips_checked}"
-        echo "  - Conexiones encontradas: ${connections_found}"
-        echo "  - Estado: $([ $connections_found -gt 0 ] && echo "CONECTIVIDAD DISPONIBLE" || echo "SIN CONECTIVIDAD DIRECTA")"
-        echo ""
-        echo "Nota: ss muestra sockets locales, no conexiones remotas activas"
+        echo "Fin del reporte ss/netstat"
         echo "==================================================================="
-    } >> "$OUTPUT_SS"
 
-    log "INFO" "Reporte ss generado: ${OUTPUT_SS}"
-    log "INFO" "IPs verificadas: ${ips_checked}, conexiones: ${connections_found}"
+    } > "${CONNECTIVITY_SS_OUTPUT}"
+
+    echo "✓ Reporte ss generado: ${CONNECTIVITY_SS_OUTPUT}"
 }
 
-# Sondas HTTP/HTTPS con curl
+# Sondear HTTP/HTTPS con curl
 probe_with_curl() {
-    local ip_file="$1"
-    log "INFO" "Ejecutando sondas HTTP/HTTPS con curl"
+    local timestamp=$(date '+%Y-%m-%d %H:%M:%S %Z')
 
-    # Generar reporte base
     {
         echo "==================================================================="
-        echo "Reporte de Sondas HTTP/HTTPS con curl"
+        echo "Reporte de Sonda HTTP/HTTPS con curl"
         echo "==================================================================="
+        echo "Generado: ${timestamp}"
+        echo "Objetivo: Verificar accesibilidad HTTP/HTTPS y medir latencia"
+        echo "Timeout: ${CURL_TIMEOUT}s (conexión), ${CURL_MAX_TIME}s (total)"
         echo ""
-        echo "Generado: $(date +'%Y-%m-%d %H:%M:%S')"
-        echo "Entrada: ${INPUT_EDGES}"
-        echo ""
-        echo "Sondas de conectividad HTTP/HTTPS:"
-        echo ""
-    } > "$OUTPUT_CURL"
 
-    local ips_probed=0
-    local successful_probes=0
+        # Obtener dominios únicos con registros A
+        local domains
+        domains=$(awk -F, '$2=="A" && NR>1 {print $1}' "${DNS_RESOLVES_FILE}" | sort -u)
 
-    # Probar cada IP
-    while IFS= read -r ip; do
-        [[ -z "$ip" ]] && continue
-        
-        {
-            echo "--- IP: $ip ---"
-            echo "Timestamp: $(date +'%H:%M:%S')"
-            
-            # Sonda HTTP (puerto 80)
-            echo "HTTP (puerto 80):"
-            local start_time=$(date +%s.%N)
-            if timeout 5 curl -s -I "http://$ip" 2>/dev/null | head -1; then
-                local end_time=$(date +%s.%N)
-                local duration=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "unknown")
-                echo "  Status: SUCCESS"
-                echo "  Duration: ${duration}s"
-                successful_probes=$((successful_probes + 1))
-            else
-                echo "  Status: TIMEOUT/FAIL"
-                echo "  Duration: >5s (timeout)"
-            fi
-            
-            # Sonda HTTPS (puerto 443)
-            echo "HTTPS (puerto 443):"
-            start_time=$(date +%s.%N)
-            if timeout 5 curl -s -I -k "https://$ip" 2>/dev/null | head -1; then
-                end_time=$(date +%s.%N)
-                duration=$(echo "$end_time - $start_time" | bc 2>/dev/null || echo "unknown")
-                echo "  Status: SUCCESS"
-                echo "  Duration: ${duration}s"
-                echo "  Protocol: HTTPS/TLS"
-                successful_probes=$((successful_probes + 1))
-            else
-                echo "  Status: TIMEOUT/FAIL"
-                echo "  Duration: >5s (timeout)"
-                echo "  Protocol: HTTPS/TLS (failed)"
-            fi
-            
+        # Probar cada dominio con HTTP y HTTPS
+        while read -r domain; do
+            [ -z "$domain" ] && continue
+
+            # Obtener IP del dominio
+            local ip
+            ip=$(awk -F, -v d="$domain" '$1==d && $2=="A" {print $3; exit}' "${DNS_RESOLVES_FILE}")
+
+            echo "-------------------------------------------------------------------"
+            echo "Dominio: ${domain} -> IP: ${ip}"
+            echo "-------------------------------------------------------------------"
+
+            # Probar HTTPS primero (más común)
             echo ""
-        } >> "$OUTPUT_CURL"
-        
-        ips_probed=$((ips_probed + 1))
-        
-    done < "$ip_file"
+            echo "[HTTPS] Probando https://${domain}"
 
-    # Resumen final
-    {
-        echo "==================================================================="
-        echo "Resumen de Sondas curl:"
-        echo "  - IPs sondeadas: ${ips_probed}"
-        echo "  - Protocolos probados: HTTP (puerto 80), HTTPS (puerto 443)"
-        echo "  - Sondas exitosas: ${successful_probes}"
-        echo "  - Timeout: 5 segundos por sonda"
-        echo "  - Estado: $([ $successful_probes -gt 0 ] && echo "SERVICIOS HTTP/HTTPS DISPONIBLES" || echo "SIN SERVICIOS HTTP/HTTPS ACCESIBLES")"
-        echo ""
-        echo "Nota: Verificación mínima sin PKI real, -k ignora certificados SSL"
-        echo "==================================================================="
-    } >> "$OUTPUT_CURL"
+            local start_time=$(date +%s)
+            local http_code
+            local curl_output
 
-    log "INFO" "Reporte curl generado: ${OUTPUT_CURL}"
-    log "INFO" "IPs sondeadas: ${ips_probed}, sondas exitosas: ${successful_probes}"
+            if curl_output=$(curl -s -o /dev/null -w "%{http_code}" \
+                --connect-timeout "${CURL_TIMEOUT}" \
+                --max-time "${CURL_MAX_TIME}" \
+                -L "https://${domain}" 2>&1); then
+                local end_time=$(date +%s)
+                local duration=$((end_time - start_time))
+
+                echo "  Status: ${curl_output}"
+                echo "  Protocolo: HTTPS (puerto 443, TLS/SSL)"
+                echo "  Tiempo de respuesta: ${duration}s"
+
+                case "${curl_output}" in
+                    200) echo "  Resultado: OK - Servidor respondió correctamente" ;;
+                    301|302|303|307|308) echo "  Resultado: Redirección detectada" ;;
+                    400|401|403|404) echo "  Resultado: Error del cliente (${curl_output})" ;;
+                    500|502|503|504) echo "  Resultado: Error del servidor (${curl_output})" ;;
+                    000) echo "  Resultado: No se pudo conectar (timeout o rechazo)" ;;
+                    *) echo "  Resultado: Código HTTP ${curl_output}" ;;
+                esac
+            else
+                local end_time=$(date +%s)
+                local duration=$((end_time - start_time))
+
+                echo "  Status: Error de conexión"
+                echo "  Protocolo: HTTPS (puerto 443)"
+                echo "  Tiempo transcurrido: ${duration}s"
+                echo "  Resultado: No se pudo establecer conexión HTTPS"
+            fi
+
+            # Probar HTTP (fallback)
+            echo ""
+            echo "[HTTP] Probando http://${domain}"
+
+            start_time=$(date +%s)
+
+            if curl_output=$(curl -s -o /dev/null -w "%{http_code}" \
+                --connect-timeout "${CURL_TIMEOUT}" \
+                --max-time "${CURL_MAX_TIME}" \
+                -L "http://${domain}" 2>&1); then
+                local end_time=$(date +%s)
+                local duration=$((end_time - start_time))
+
+                echo "  Status: ${curl_output}"
+                echo "  Protocolo: HTTP (puerto 80, sin cifrado)"
+                echo "  Tiempo de respuesta: ${duration}s"
+
+                case "${curl_output}" in
+                    200) echo "  Resultado: OK - Servidor respondió correctamente" ;;
+                    301|302|303|307|308) echo "  Resultado: Redirección detectada (probablemente a HTTPS)" ;;
+                    400|401|403|404) echo "  Resultado: Error del cliente (${curl_output})" ;;
+                    500|502|503|504) echo "  Resultado: Error del servidor (${curl_output})" ;;
+                    000) echo "  Resultado: No se pudo conectar (timeout o rechazo)" ;;
+                    *) echo "  Resultado: Código HTTP ${curl_output}" ;;
+                esac
+            else
+                local end_time=$(date +%s)
+                local duration=$((end_time - start_time))
+
+                echo "  Status: Error de conexión"
+                echo "  Protocolo: HTTP (puerto 80)"
+                echo "  Tiempo transcurrido: ${duration}s"
+                echo "  Resultado: No se pudo establecer conexión HTTP"
+            fi
+
+            echo ""
+        done <<< "$domains"
+
+        echo "==================================================================="
+        echo "Fin del reporte curl"
+        echo "==================================================================="
+
+    } > "${CURL_PROBE_OUTPUT}"
+
+    echo "✓ Reporte curl generado: ${CURL_PROBE_OUTPUT}"
 }
 
-# Función principal
+# Main
 main() {
-    log "INFO" "Iniciando verificación de conectividad DNS"
+    echo "=== Verificación de Conectividad ===" >&2
+    echo "" >&2
 
-    # Asegurar que existe el directorio de salida
-    ensure_directory "${OUT_DIR:-out}"
+    # Validar prerequisitos
+    validate_prerequisites
 
-    # Paso 1: Validar entrada
-    validate_input
+    # Crear directorio de salida si no existe
+    mkdir -p "${OUT_DIR}"
 
-    # Paso 2: Extraer IPs finales
-    local temp_ips_file
-    temp_ips_file=$(extract_target_ips)
-    
-    if [[ $? -ne 0 ]] || [[ ! -f "$temp_ips_file" ]]; then
-        log "WARN" "No hay IPs para verificar, generando reportes vacíos"
-        
-        # Generar reportes vacíos
-        echo "Sin IPs disponibles para verificación" > "$OUTPUT_SS"
-        echo "Sin IPs disponibles para verificación" > "$OUTPUT_CURL"
-        
-        exit $EXIT_SUCCESS
-    fi
+    # Ejecutar verificaciones
+    echo "Ejecutando verificación con ss..." >&2
+    verify_with_ss
 
-    # Paso 3: Verificar con ss
-    probe_with_ss "$temp_ips_file"
+    echo "" >&2
+    echo "Ejecutando sondas HTTP/HTTPS con curl..." >&2
+    probe_with_curl
 
-    # Paso 4: Sondear con curl
-    probe_with_curl "$temp_ips_file"
+    echo "" >&2
+    echo "✓ Verificación de conectividad completada" >&2
+    echo "  - ${CONNECTIVITY_SS_OUTPUT}" >&2
+    echo "  - ${CURL_PROBE_OUTPUT}" >&2
 
-    log "INFO" "Verificación de conectividad completada exitosamente"
-    log "INFO" "Salidas generadas:"
-    log "INFO" "  - ${OUTPUT_SS}"
-    log "INFO" "  - ${OUTPUT_CURL}"
-
-    exit $EXIT_SUCCESS
+    exit 0
 }
 
-# Ejecutar si se invoca directamente
-if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+# Ejecutar solo si se invoca directamente
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     main "$@"
 fi

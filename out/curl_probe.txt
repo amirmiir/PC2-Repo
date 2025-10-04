@@ -1,29 +1,42 @@
 ===================================================================
-Reporte de Sondas HTTP/HTTPS con curl
+Reporte de Sonda HTTP/HTTPS con curl
 ===================================================================
+Generado: 2025-10-03 08:34:47 MDT
+Objetivo: Verificar accesibilidad HTTP/HTTPS y medir latencia
+Timeout: 5s (conexión), 10s (total)
 
-Generado: 2025-10-03 22:20:41
-Entrada: out/edges.csv
+-------------------------------------------------------------------
+Dominio: github.com -> IP: 4.228.31.150
+-------------------------------------------------------------------
 
-Sondas de conectividad HTTP/HTTPS:
+[HTTPS] Probando https://github.com
+  Status: 200
+  Protocolo: HTTPS (puerto 443, TLS/SSL)
+  Tiempo de respuesta: 1s
+  Resultado: OK - Servidor respondió correctamente
 
---- IP: 93.184.216.34 ---
-Timestamp: 22:20:41
-HTTP (puerto 80):
-  Status: TIMEOUT/FAIL
-  Duration: >5s (timeout)
-HTTPS (puerto 443):
-  Status: TIMEOUT/FAIL
-  Duration: >5s (timeout)
-  Protocol: HTTPS/TLS (failed)
+[HTTP] Probando http://github.com
+  Status: 200
+  Protocolo: HTTP (puerto 80, sin cifrado)
+  Tiempo de respuesta: 1s
+  Resultado: OK - Servidor respondió correctamente
+
+-------------------------------------------------------------------
+Dominio: google.com -> IP: 142.250.0.113
+-------------------------------------------------------------------
+
+[HTTPS] Probando https://google.com
+  Status: 200
+  Protocolo: HTTPS (puerto 443, TLS/SSL)
+  Tiempo de respuesta: 0s
+  Resultado: OK - Servidor respondió correctamente
+
+[HTTP] Probando http://google.com
+  Status: 200
+  Protocolo: HTTP (puerto 80, sin cifrado)
+  Tiempo de respuesta: 0s
+  Resultado: OK - Servidor respondió correctamente
 
 ===================================================================
-Resumen de Sondas curl:
-  - IPs sondeadas: 1
-  - Protocolos probados: HTTP (puerto 80), HTTPS (puerto 443)
-  - Sondas exitosas: 0
-  - Timeout: 5 segundos por sonda
-  - Estado: SIN SERVICIOS HTTP/HTTPS ACCESIBLES
-
-Nota: Verificación mínima sin PKI real, -k ignora certificados SSL
+Fin del reporte curl
 ===================================================================
