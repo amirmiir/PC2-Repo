@@ -465,6 +465,55 @@ grep -q "CYCLE" out/cycles_report.txt && echo "Ciclos detectados correctamente"
 
 Dejé implementada la detección completa de ciclos CNAME que será validada por los tests de Diego. El sistema ahora puede identificar problemas de configuración DNS que causarían resoluciones infinitas.
 
+### Complemento - Verificación de Conectividad
+
+Implementé también `src/verify_connectivity.sh` para completar la verificación de conectividad requerida en día 4. El script extrae IPs finales del grafo y ejecuta verificaciones con `ss` y `curl`.
+
+### Comandos ejecutados para conectividad
+
+```bash
+# Crear script de verificación de conectividad
+touch src/verify_connectivity.sh
+chmod +x src/verify_connectivity.sh
+
+# Ejecutar verificación completa
+./src/verify_connectivity.sh
+
+# Verificar artefactos generados
+ls -lh out/connectivity_ss.txt out/curl_probe.txt
+
+# Validar contenido según contrato
+grep -E "(tcp|udp|LISTEN|ESTAB)" out/connectivity_ss.txt
+grep -E "(Duration|timeout)" out/curl_probe.txt
+```
+
+### Salidas de conectividad
+
+- **Comando**: `./src/verify_connectivity.sh` - **Código**: 0 (éxito)
+  ```
+  [2025-10-03 22:20:41] [INFO] Verificando conectividad con ss
+  [2025-10-03 22:20:41] [INFO] IPs verificadas: 1, conexiones: 1
+  [2025-10-03 22:20:41] [INFO] Ejecutando sondas HTTP/HTTPS con curl
+  [2025-10-03 22:20:51] [INFO] IPs sondeadas: 1, sondas exitosas: 0
+  ```
+
+### Artefactos de conectividad generados
+
+**Archivo**: `out/connectivity_ss.txt` (2.3K)
+- Evidencia de sockets con `ss` hacia IP final 93.184.216.34
+- Conexiones LISTEN detectadas en puertos locales
+- Verificación de alcance y estado de interfaces
+
+**Archivo**: `out/curl_probe.txt` (897 bytes)
+- Sondas HTTP (puerto 80) y HTTPS (puerto 443)
+- Timeouts de 5 segundos configurados
+- Estado: TIMEOUT/FAIL para la IP de prueba
+
+**Actualización**: `docs/contrato-salidas.md`
+- Documentación completa de cycles_report.txt, connectivity_ss.txt y curl_probe.txt
+- Comandos de validación con grep/awk para cada artefacto
+- Formatos esperados y estructuras de salida
+
 ---
 
 ## Diego Orrego (Día 4) - Jueves 02/10/2025
