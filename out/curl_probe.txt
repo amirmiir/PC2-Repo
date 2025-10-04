@@ -1,0 +1,29 @@
+===================================================================
+Reporte de Sondas HTTP/HTTPS con curl
+===================================================================
+
+Generado: 2025-10-03 22:20:41
+Entrada: out/edges.csv
+
+Sondas de conectividad HTTP/HTTPS:
+
+--- IP: 93.184.216.34 ---
+Timestamp: 22:20:41
+HTTP (puerto 80):
+  Status: TIMEOUT/FAIL
+  Duration: >5s (timeout)
+HTTPS (puerto 443):
+  Status: TIMEOUT/FAIL
+  Duration: >5s (timeout)
+  Protocol: HTTPS/TLS (failed)
+
+===================================================================
+Resumen de Sondas curl:
+  - IPs sondeadas: 1
+  - Protocolos probados: HTTP (puerto 80), HTTPS (puerto 443)
+  - Sondas exitosas: 0
+  - Timeout: 5 segundos por sonda
+  - Estado: SIN SERVICIOS HTTP/HTTPS ACCESIBLES
+
+Nota: Verificación mínima sin PKI real, -k ignora certificados SSL
+===================================================================

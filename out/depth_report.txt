@@ -1,0 +1,23 @@
+===================================================================
+Reporte de Profundidad del Grafo DNS
+===================================================================
+
+Generado: 2025-10-02 23:58:33
+Entrada: out/dns_resolves.csv
+
+Métricas:
+  - Cadenas analizadas: 1
+  - Profundidad máxima: 1
+  - Profundidad promedio: 1.00
+
+Definición:
+  Profundidad = número de saltos desde dominio origen hasta registro A final
+
+Ejemplo:
+  ejemplo.com -> cname1.com -> cname2.com -> 1.2.3.4
+  Profundidad: 3 (3 aristas en la cadena)
+
+Nota:
+  Para dominios con resolución A directa (sin CNAMEs), profundidad = 1
+
+===================================================================
