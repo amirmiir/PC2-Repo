@@ -194,22 +194,34 @@ main() {
     local resolved_count=0
     
     # Procesar cada dominio del archivo
+    # Deshabilitar set -e temporalmente para permitir que algunos dominios fallen sin detener el script
+    set +e
     while IFS= read -r domain; do
         # Ignorar líneas vacías y comentarios
         [[ -n "$domain" && ! "$domain" =~ ^[[:space:]]*# ]] || continue
-        
+
         # Limpiar espacios en blanco
         domain=$(echo "$domain" | tr -d '[:space:]')
         [[ -n "$domain" ]] || continue
-        
+
         ((domain_count++))
-        
+
         # Resolver dominio y agregar al CSV
-        if resolve_domain "$domain" >> "$OUTPUT_FILE"; then
+        local lines_before
+        lines_before=$(wc -l < "$OUTPUT_FILE")
+
+        resolve_domain "$domain" >> "$OUTPUT_FILE"
+
+        # Verificar si se agregaron líneas al CSV
+        local lines_after
+        lines_after=$(wc -l < "$OUTPUT_FILE")
+        if [[ $lines_after -gt $lines_before ]]; then
             ((resolved_count++))
         fi
-        
+
     done < "$DOMAINS_FILE"
+    # Reactivar set -e
+    set -e
     
     log "INFO" "Procesamiento completado: $resolved_count/$domain_count dominios resueltos"
     

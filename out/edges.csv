@@ -1,5 +1,0 @@
-from,to,kind
-www.example.com,cdn1.example.com,CNAME
-cdn1.example.com,cdn2.example.com,CNAME
-cdn2.example.com,cdn3.example.com,CNAME
-cdn3.example.com,93.184.216.34,A

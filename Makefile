@@ -177,7 +177,7 @@ run: build
 	@echo "==================================================================="
 	@echo ""
 	@# TODO: En sprints futuros se agregará build_graph.sh y verify_connectivity.sh
-	@echo "Estado actual: Resolución DNS completada."
+	@echo "Estado actual: Resolución DNS completada."	
 	@echo "Próximos pasos (sprints 2-3): construcción de grafo, detección"
 	@echo "de ciclos y verificación de conectividad."
 	@echo ""

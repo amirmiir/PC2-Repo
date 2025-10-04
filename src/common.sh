@@ -21,15 +21,16 @@ declare -a TEMP_FILES=()
 # Función de limpieza al salir
 cleanup() {
     local exit_code=$?
-    
+
     # Limpiar archivos temporales
     for temp_file in "${TEMP_FILES[@]:-}"; do
         if [[ -f "$temp_file" ]]; then
-            rm -f "$temp_file"
+            rm -f "$temp_file" 2>/dev/null || true
         fi
     done
-    
-    exit $exit_code
+
+    # No hacer exit aquí, solo limpiar
+    # El exit code original se preservará
 }
 
 # Configurar trap para limpieza
