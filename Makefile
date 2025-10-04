@@ -19,44 +19,6 @@ REQUIRED_TOOLS := dig curl ss awk sed sort uniq tee find
 # Targets .PHONY (no generan archivos)
 .PHONY: all tools build test run clean help
 
-# ==============================================================================
-# TARGETS CON CACHE INCREMENTAL - Solo rebuilding si cambian dependencias
-# ==============================================================================
-
-# Target para dns_resolves.csv - depende del archivo de dominios y script
-$(OUT_DIR)/dns_resolves.csv: $(DOMAINS_FILE) $(SRC_DIR)/resolve_dns.sh $(SRC_DIR)/common.sh
-	@echo "==================================================================="
-	@echo "Generando $(OUT_DIR)/dns_resolves.csv (caché incremental)"
-	@echo "==================================================================="
-	@mkdir -p $(OUT_DIR)
-	@# Verificar que existe el archivo de dominios
-	@if [ ! -f "$(DOMAINS_FILE)" ]; then \
-		echo "ERROR: Archivo de dominios '$(DOMAINS_FILE)' no encontrado."; \
-		echo "Especifique DOMAINS_FILE válido o use el archivo de ejemplo."; \
-		exit 1; \
-	fi
-	@echo "Variables activas:"
-	@echo "  DOMAINS_FILE = $(DOMAINS_FILE)"
-	@echo "  DNS_SERVER   = $(DNS_SERVER)"
-	@echo ""
-	@DOMAINS_FILE=$(DOMAINS_FILE) DNS_SERVER=$(DNS_SERVER) $(SRC_DIR)/resolve_dns.sh || { \
-		echo "ADVERTENCIA: resolve_dns.sh retornó código $$?"; \
-		echo "Verificando si se generaron artefactos..."; \
-		if [ -f "$(OUT_DIR)/dns_resolves.csv" ]; then \
-			echo "CSV generado, continuando..."; \
-		else \
-			echo "ERROR: No se generó CSV"; \
-			exit 1; \
-		fi; \
-	}
-
-# Target para edges.csv y depth_report.txt - dependen de dns_resolves.csv y build_graph.sh
-$(OUT_DIR)/edges.csv $(OUT_DIR)/depth_report.txt: $(OUT_DIR)/dns_resolves.csv $(SRC_DIR)/build_graph.sh $(SRC_DIR)/common.sh
-	@echo "==================================================================="
-	@echo "Generando grafo DNS (edges.csv + depth_report.txt)"
-	@echo "==================================================================="
-	@$(SRC_DIR)/build_graph.sh
-
 # Target por defecto
 all: tools build
 
@@ -116,27 +78,49 @@ tools:
 		which $(tool) > /dev/null 2>&1 || \
 		(echo "ERROR: Herramienta '$(tool)' no encontrada. Por favor instálela." && exit 1);)
 	@echo ""
-	@echo "OK - Todas las herramientas requeridas están instaladas:"
+	@echo "✓ Todas las herramientas requeridas están instaladas:"
 	@$(foreach tool,$(REQUIRED_TOOLS), \
-		echo "  OK $(tool): $$(which $(tool))";)
+		echo "  ✓ $(tool): $$(which $(tool))";)
 	@echo ""
 	@echo "==================================================================="
 
 # ==============================================================================
 # TARGET: build - Genera artefactos sin ejecutar (Configurar-Lanzar-Ejecutar)
 # ==============================================================================
-build: tools $(OUT_DIR)/dns_resolves.csv $(OUT_DIR)/edges.csv $(OUT_DIR)/depth_report.txt
+build: tools
+	@echo "==================================================================="
+	@echo "Construyendo artefactos en $(OUT_DIR)/..."
+	@echo "==================================================================="
+	@echo ""
+	@echo "Variables activas:"
+	@echo "  DOMAINS_FILE = $(DOMAINS_FILE)"
+	@echo "  DNS_SERVER   = $(DNS_SERVER)"
+	@echo ""
+	@# Crear directorio de salida si no existe
+	@mkdir -p $(OUT_DIR)
+	@# Verificar que existe el archivo de dominios
+	@if [ ! -f "$(DOMAINS_FILE)" ]; then \
+		echo "ERROR: Archivo de dominios '$(DOMAINS_FILE)' no encontrado."; \
+		echo "Especifique DOMAINS_FILE válido o use el archivo de ejemplo."; \
+		exit 1; \
+	fi
+	@# Ejecutar script de resolución DNS
+	@echo "Ejecutando resolución DNS..."
+	@DOMAINS_FILE=$(DOMAINS_FILE) DNS_SERVER=$(DNS_SERVER) $(SRC_DIR)/resolve_dns.sh || { \
+		echo "ADVERTENCIA: resolve_dns.sh retornó código $$?"; \
+		echo "Verificando si se generaron artefactos..."; \
+		if [ -f "$(OUT_DIR)/dns_resolves.csv" ]; then \
+			echo "CSV generado, continuando..."; \
+		else \
+			echo "ERROR: No se generó CSV"; \
+			exit 1; \
+		fi; \
+	}
 	@echo ""
 	@echo "==================================================================="
-	@echo "Build completado con caché incremental"
+	@echo "Build completado. Artefactos generados en $(OUT_DIR)/"
 	@echo "==================================================================="
-	@echo ""
-	@echo "Artefactos generados en $(OUT_DIR)/:"
 	@ls -lh $(OUT_DIR)/
-	@echo ""
-	@echo "Nota: Los archivos solo se regeneran si cambian sus dependencias"
-	@echo "- dns_resolves.csv: se regenera si cambia $(DOMAINS_FILE) o scripts DNS" 
-	@echo "- edges.csv + depth_report.txt: se regeneran si cambia dns_resolves.csv o build_graph.sh"
 
 # ==============================================================================
 # TARGET: test - Ejecuta suite de pruebas Bats
@@ -191,12 +175,12 @@ clean:
 	@if [ -d "$(OUT_DIR)" ]; then \
 		echo "Eliminando contenido de $(OUT_DIR)/..."; \
 		rm -rf $(OUT_DIR)/*; \
-		echo "OK $(OUT_DIR)/ limpiado"; \
+		echo "✓ $(OUT_DIR)/ limpiado"; \
 	fi
 	@if [ -d "$(DIST_DIR)" ]; then \
 		echo "Eliminando contenido de $(DIST_DIR)/..."; \
 		rm -rf $(DIST_DIR)/*; \
-		echo "OK $(DIST_DIR)/ limpiado"; \
+		echo "✓ $(DIST_DIR)/ limpiado"; \
 	fi
 	@echo ""
 	@echo "==================================================================="
