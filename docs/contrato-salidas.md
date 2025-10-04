@@ -207,32 +207,109 @@ Validar que el archivo no está vacío:
 
 ### cycles_report.txt
 
-**Propósito**: Reporte de ciclos detectados en el grafo DNS.
+**Propósito**: Reporte de ciclos detectados en cadenas CNAME del grafo DNS.
 
-**Validación**:
+**Formato**: Texto estructurado con delimitadores ===
+
+**Estructura del archivo**:
+```
+===================================================================
+Reporte de Detección de Ciclos DNS
+===================================================================
+
+Generado: <timestamp>
+Entrada: <archivo_edges_csv>
+
+Análisis de cadenas CNAME:
+
+CYCLE DETECTADO:
+  Nodos involucrados: <lista_nodos>
+  Inicio del ciclo: <nodo_inicial>
+
+Estado: CICLOS ENCONTRADOS (N) | SIN CICLOS
+===================================================================
+```
+
+**Validación con herramientas de texto**:
+
+Verificar detección de ciclos:
 ```bash
-# Si hay ciclos, debe contener palabra clave CYCLE
-if grep -q "CYCLE" out/cycles_report.txt; then
-    echo "Ciclo detectado correctamente"
-fi
+grep -q "CYCLE" out/cycles_report.txt && echo "Ciclos detectados" || echo "Sin ciclos"
+```
+
+Contar ciclos encontrados:
+```bash
+grep -c "CYCLE DETECTADO" out/cycles_report.txt
+```
+
+Verificar estado del reporte:
+```bash
+grep -E "(CICLOS ENCONTRADOS|SIN CICLOS)" out/cycles_report.txt
 ```
 
 ### connectivity_ss.txt
 
-**Propósito**: Evidencia de verificación de conectividad con `ss` hacia IPs finales.
+**Propósito**: Evidencia de verificación de conectividad con `ss` (socket statistics) hacia IPs finales derivadas del grafo DNS.
 
-**Validación**:
+**Formato**: Texto estructurado con secciones por IP
+
+**Contenido esperado**:
+- Timestamp de verificación por IP
+- Conexiones establecidas (LISTEN/ESTAB)
+- Estado de interfaces de red
+- Verificación de alcance a IP destino
+- Resumen de conectividad
+
+**Validación con herramientas de texto**:
+
+Verificar existencia y contenido:
 ```bash
-[ -f out/connectivity_ss.txt ] && [ -s out/connectivity_ss.txt ]
+[ -f out/connectivity_ss.txt ] && [ -s out/connectivity_ss.txt ] && echo "Reporte ss generado"
+```
+
+Buscar evidencia de sockets:
+```bash
+grep -E "(tcp|udp|LISTEN|ESTAB|socket)" out/connectivity_ss.txt
+```
+
+Verificar estructura del reporte:
+```bash
+grep -c "^--- IP:" out/connectivity_ss.txt  # Debe ser >= 1 si hay IPs
 ```
 
 ### curl_probe.txt
 
-**Propósito**: Resultado de sondas HTTP/HTTPS con `curl`.
+**Propósito**: Resultado de sondas HTTP/HTTPS con `curl` hacia IPs finales del grafo DNS.
 
-**Validación**:
+**Formato**: Texto estructurado con secciones por IP y protocolo
+
+**Contenido esperado**:
+- Timestamp de sonda por IP
+- Resultados HTTP (puerto 80) y HTTPS (puerto 443)
+- Status: SUCCESS/TIMEOUT/FAIL
+- Duración de la sonda en segundos
+- Protocolos probados y estados
+
+**Validación con herramientas de texto**:
+
+Verificar existencia y contenido:
 ```bash
-grep -E "(HTTP|https?://)" out/curl_probe.txt
+[ -f out/curl_probe.txt ] && [ -s out/curl_probe.txt ] && echo "Reporte curl generado"
+```
+
+Buscar indicadores de protocolo:
+```bash
+grep -E "(HTTP|HTTPS|http://|https://)" out/curl_probe.txt
+```
+
+Verificar información de tiempos:
+```bash
+grep -E "(Duration|timeout|seconds?)" out/curl_probe.txt
+```
+
+Contar sondas exitosas:
+```bash
+grep -c "Status: SUCCESS" out/curl_probe.txt
 ```
 
 ## Variables de Entorno Requeridas
