@@ -210,7 +210,7 @@ verify_with_ss() {
 
     } > "${CONNECTIVITY_SS_OUTPUT}"
 
-    echo "✓ Reporte ss generado: ${CONNECTIVITY_SS_OUTPUT}"
+    echo "OK - Reporte ss generado: ${CONNECTIVITY_SS_OUTPUT}"
 }
 
 # Sondear HTTP/HTTPS con curl
@@ -323,7 +323,7 @@ probe_with_curl() {
 
     } > "${CURL_PROBE_OUTPUT}"
 
-    echo "✓ Reporte curl generado: ${CURL_PROBE_OUTPUT}"
+    echo "OK - Reporte curl generado: ${CURL_PROBE_OUTPUT}"
 }
 
 # Main
@@ -346,7 +346,7 @@ main() {
     probe_with_curl
 
     echo "" >&2
-    echo "✓ Verificación de conectividad completada" >&2
+    echo "OK - Verificación de conectividad completada" >&2
     echo "  - ${CONNECTIVITY_SS_OUTPUT}" >&2
     echo "  - ${CURL_PROBE_OUTPUT}" >&2
 
